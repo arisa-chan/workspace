@@ -1,0 +1,1056 @@
+=== PDF page 229 ===
+ 
+ 
+2 1 6                S u r f a c e  C o a t i n g s  
+ 
+Metallique (CRlF), Section Construction Metallique, Les Assemblages par    
+Boulons de Haute Resistance , Report MT 48, MT5O, Brussels, Belgium, 1969 
+(in French). 
+12.6  T. v. d. Schaaf, Influence of Protective Surface Coatings on the Slip Behavior of 
+High Strength Bolted Joints Subjected to Sustained Loading , Stevin Laboratory, 
+Report 6-68-5-VB-18, Delft University of Technology, Delft, the Netherlands, 
+1968(in Dutch). 
+12.7 S. Y. Beano and D. D. Vasarhelyi, The Effect of Various Treatments of the 
+Paving Surface on the Coefficient of Friction in Bolted Joints , University of 
+Washington, Department of Civil Engineering, Seattle, December 1958. 
+12.8 L. Zennaro, Slip Tests of High Strength Bolted  Joints with Different Galvanized 
+Coating Structures , Document CECM-X-71-8. 
+12.9 V. Lobb and F. Stoller, “Bolted Joints Under Sustained Loading,” Journal of the 
+Structural Division, ASCE, vol. 97, ST3, March 1971. 
+12.10 D. J. L. Kennedy, High Strength Bolted Galvanized Joints , Engineering 
+Extension Series 15, Proceedings, ASCE Specialty Conference on Steel 
+Structures, University of Missouri, Columbia, 1970. 
+12.11 American Welding Society, Recommended Practices  for Metallizing with 
+Aluminum and Zinc for Protection of iron and Steel , American Welding Society 
+C2.2-67, New York, 1967. 
+12.12 Steel Structures Painting Council (SSPC), Guide to Zinc-Rich Coating Systems , 
+SSPC Specification 12.00. 
+12.13 W. H. Munse and P. C. Birkemoe, High Strength Bolting of Galvanized 
+Connections, The Australian Institute of Steel Construction and the Australian 
+Zinc Development Association, Sydney-Melbourne, Australia, August 1969. 
+12.14 H. Fouad, “Slip Behavior of Bolted Friction-Type Joints with Coated Contact 
+Surfaces,” M.S. Thesis, The University of Texas at Austin, January 1978. 
+12.15 M. G. Nanninga, “Creep Behavior of Friction-Type Joints with Coated Faying 
+Surfaces,” M.S. Thesis, The University of Texas at Austin, January 1978. 
+=== PDF page 230 ===
+ 
+ 
+Chapter Thirteen 
+Eccentrically Loaded Joints 
+ 
+ 
+ 
+ 
+13.1 INTRODUCTION 
+ 
+In eccentrically loaded joints, the connection is subjected to applied loads that result in 
+a line of action passing outside the center of rotation of the fastener group. Some 
+common examples are bracket-type connecti ons, web splices in beams and girders, 
+and the standard beam connections shown in Fig. 13.1. Because of the eccentricity 
+of the applied load, the fastener group is subjected to a shear force and a twisting 
+moment. Both the moment and the shear force result in shear stresses in the 
+fasteners, and both of these effects have  to be considered in determining the 
+capacity of the connection. 
+The effect of an eccentric load on a fastener group was studied as early as 1870.13.1 
+For a very long period following that, design was carried out on an elastic basis, 
+assuming that rotation of the connection took place about the center of gravity of 
+the fastener group. This meant that the problem could be treated as the 
+superposition of a concentric shear case a nd a shear due to the torsional moment. 
+The assumption of rotation about the center of gravity was the basis for design 
+tables in the AISC Manual of Steel Construction published in 1970, 13.2 although it 
+was recognized that the method produced conservative results, and empirically 
+derived adjustments were permitted. 
+The assumption of connection rotation about the center of gravity identifies 
+fastener forces that are not compatible wi th the deformations necessary for such a 
+rotation. An article published in 1914 13.3 reported on work by P. Gullander of 
+Chalmers Technical University at Gothenburg, Sweden that suggested that rotation 
+had to be considered as occurring about an  instantaneous center. Calculations done 
+on this basis produced a set of forces in the fasteners that were consistent with the 
+deformations imposed on those fasteners. 
+The first application of the instantaneous center concept to test results, including 
+use of a measured load versus deformation re sponse for the fasteners, appears to have 
+been made by Yarimci and Slutter, 13.4, 13.5  who performed tests on riveted 
+connections. Since then, both experimental and analytical work has been carried 
+out on bolted connections, 13.6–13.10  the main effort direct ed toward information  
+ 
+ 
+217 
+=== PDF page 231 ===
+218            Eccentrically Loaded Joints 
+ 
+Fig. 13.1.  Typical eccentrically loaded connections.  ( a) Bracket connection.  ( b)  Beam 
+web splice.  ( c) Standard beam connections. 
+ 
+on the ultimate strength of such connections. In this chapter dealing with the 
+analysis and design of eccentrically load ed fastener groups, emphasis will be 
+placed upon the connection type shown in Fig. 13.l a. The application to web 
+splices in girders (Fig. 13.1 b) and standard beam connections is discussed in 
+Chapters 16 and 18, respectively. 
+ 
+ 
+13.2 BEHAVIOR OF A FASTENER GROUP UNDER ECCENTRIC 
+LOADING 
+ 
+Tests on special connections have been performed to evaluate the load versus 
+deformation behavior of fastener groups subjected to an eccentric shear load. 
+Riveted as well as high-strength bolted connections have been  
+examined. 13.4–13.8  Most test specimens were of the type shown in Fig. 13.2, with 
+a fastener group consisting of one or two vertical lines of fasteners. Since the 
+connection is symmetric with respect to the line of action of the load, each test 
+provides two load versus deformation curves for identical connections.  
+In general, the design of the test specimens caused the fastener group in the 
+=== PDF page 232 ===
+13.2  Behavior of a Fastener Group under Eccentric Loading   219 
+ 
+Fig. 13.2.   Test specimen with eccentrically loaded fastener group . 
+ 
+web angles to be the critical component, a nd the test results can therefore be used 
+to assess the strength of the group. Howeve r, the load versus deformation behavior 
+of an eccentrically loaded c onnection in the field may al so be affected by other 
+components of the connection. 
+The behavior of various fastener patte rns under different eccentricities can be 
+represented by load versus rotation curves of the type shown in Fig. 13.3. 13.5 The 
+straight line from the origin to point A represents the elastic rotation, and the transition 
+segment AB identifies elastic as well as plastic deformations. Beyond point B the 
+rotation is mainly produced by plastic deformations. This segment of the load versus 
+rotation curve is terminated by the failure lo ad, reached as one or more of the fasteners 
+fail in shear. 
+Load versus rotation curves have been developed for bolted as well as riveted 
+specimens.13.8 Figure 13.4 shows a typical load versus rotation curve taken from the 
+source material of Ref. 13.8 for a bolted specimen with two vertical rows of ¾-in. 
+dia. A325 bolts. The horizontal distance from the load to the centroid of the 
+fastener group was 12 in. In this test seri es, the bolt holes in the beam web and web 
+angles were match drilled for fitted bolts. The resulting minimum clearance 
+between the bolt and the hole minimized the joint slip, and caused the applied load  
+ 
+Fig. 13.3.  Idealized load versus rotation diagram for an eccentrically loaded fastener group. 
+=== PDF page 233 ===
+220            Eccentrically Loaded Joints 
+ 
+Fig. 13.4.  Load versus rotation curve for bolted connections (Ref. 13.8).  (Test specimen 
+shown in Fig. 13.2.) 
+ 
+to be taken immediately in bearing on the bo lts. In practice, bolts are usually placed in 
+holes with 1/16 in. clearance, and slip ma y occur when the slip  resistance of the 
+connection is exceeded. Slip w ill bring one or more fastener s into bearing. Thereafter, 
+the connection will behave in much the same way as described by Fig. 13.4. 
+The amount of slip to be expected depends on the hole clearance, the fastener 
+pattern, and the alignment of the holes in  the connection. The rotation due to slip 
+decreases rapidly with an in crease in distance from the outermost fastener to the 
+center of rotation of the bolt group. In most practical situations the slips will be so 
+small that they do not have a significant effect on the serviceability of the 
+structure. Therefore, most joints can be designed on the basis of the ultimate 
+strength of the joint. 
+ 
+ 
+13.3 ANALYSIS OF ECCENTRICALLY LOADED FASTENER GROUPS 
+ 
+For many years the analysis and design of  eccentrically loaded fastener groups was 
+based on the assumption that rotation of th e connection takes place about the center of 
+gravity of the fastener group and that the load versus deformation response of an 
+individual fastener is linear. 13.11 In this method, the eccentric  load is resolved into a 
+shear load P acting through the centroid of the fastener group and a torsional 
+moment Pe, where e is the eccentricity of P with respect to the centroid of the 
+fastener group. The shear force acting through the centroid is assumed to be 
+distributed uniformly among the fasteners, as in other shear splices. The moment is 
+ 
+=== PDF page 234 ===
+13.3 Analysis of Eccentrically L oaded Fastener Groups     221 
+ 
+assumed to cause stresses in the fasteners th at vary linearly with the distance from the 
+fastener to the center of gravity. The stress in any fastener is ev aluated by vectorially 
+adding the stress resulting from each load component, that is, the con-centric shear 
+force and the moment. The method further assumes the connected plates to be rigid 
+enough to remain essentially undeformed during twist. The influence of the frictional 
+resistance between the component parts of the connection is neglected. 
+Tests on eccentrically loaded riveted connections indicated that the elastic analysis 
+yielded a conservative design. 13.4, 13.5  On the basis of test results, the method was 
+modified by introducing an “effective eccentricity,” which is less than the actual 
+eccentricity. Empirical formulas to dete rmine the effective eccentricity as a 
+function of specific fastener  patterns were developed. 13.4, 13.5  Reduction in 
+eccentricity yielded a factor of safety mo re compatible with the value used for 
+shear alone. The method is essentially based on the elastic behavior of the fastener 
+group described in this section. Reduci ng the eccentricity decreases the magnitude 
+of the bending component and recognizes the actual strength of the joint observed 
+in tests. 
+Although use of the method just outlined produced safe designs using either 
+the actual or the so-called effective eccentricity, physica l testing showed that the 
+factor of safety with respect to the ultimate load was both variable and larger than 
+that used for other types of bolted connections. Furthermore, the method of 
+analysis did not provide the necessary  information required in order to 
+accommodate load factor design. As a resu lt, the work described in Section 13.2 
+was carried out. 13.8  With slight modification, the procedure can be used for the 
+analysis of eccentrically lo aded bolted connections in which slip resistance is 
+desired. 
+ 
+13.3.1 Slip-Resistant Joints 
+ 
+Initially, the load versus de formation curve of an eccentri cally loaded joint can be 
+approximated by a straight line representing the elastic rotation. (See Figs. 13.3 
+and 13.4). During this stage the applied load is completely carried by frictional 
+resistance between the constituent parts of  the connection. This phase of load 
+transfer is expected to be terminated by a slip of the connection, although physical 
+tests show that slip may or may not occur. 13.12  If slip does occur, the movement that 
+takes place can be expected to bring one or more bolts into bearing. If slip does not 
+occur, it means that one or more bolts were initially in bearing. 
+A prediction of the load that will cause slip can be made on the basis of the 
+following assumptions: 
+1. At any value of the load, the connection rotates about an instantaneous 
+center of rotation. 
+2. At the slip load of the connection, the maximu m slip resistance of each 
+individual fastener is reached. An analogous assumption has been used to 
+describe the slip resistance  of simple shear splices.  
+3. The slip resistance of each fastener  can be represented by a force at the 
+center of the bolt acting perpendicularly to the radius of rotation. 
+=== PDF page 235 ===
+222            Eccentrically Loaded Joints 
+ 
+ 
+The instantaneous center of rotation is that point about which pure rotation of 
+the connected parts takes place (See Fig. 13.5.)  The term “instantaneous” is used 
+because, in general, the center of rotation is  at a different location for each value of 
+the applied load. The location also depends  on the fastener arrangement. As shown 
+in Fig. 13.5,  the instantaneous center of rotation is located on a line perpendicular 
+to the line of action of the load. This perpendicular must also pass through the 
+center of gravity of the fastener group. 
+The maximum slip resistance Rs of a single fastener was described in Chapter 5 
+and can be expressed as 
+ 
+      isS TmkR =         () 1.13  
+ 
+Therefore, based on the previously stated  assumptions, at the slip load of the 
+connection each fastener is subjected to a load Rs acting perpendicularly to the 
+radius of rotation. Figure 13.6 shows schematically the load transfer for a sym- 
+metric fastener pattern. The three equations of equilibrium must be employed to 
+determine the coordinates of the instantaneous center and the maximum value of 
+the load that results in slip of the connection. The solution of this problem is 
+generally accomplished by an iterativ e procedure. A trial location of the 
+instantaneous center can be selected. For convenience, the origin of the coordinate 
+system can be placed at the instantaneous center, with the x-axis perpendicular to 
+the applied load. The radius of rotation ri of the ith fastener is equal to  
+ 
+     22 iii yxr +=         () 2.13  
+ 
+Equating the sum of all forces in the x and y direction as well as the sum of the 
+moments about the instantaneous center to zero, yields 
+ 
+Fig. 13.5.  Instantaneous center of rotation. 
+=== PDF page 236 ===
+13.3 Analysis of Eccentrically L oaded Fastener Groups     223 
+ 
+ 
+Fig. 13.6.  Analyses of eccentrically load ed fastener group.  c.g.:  Ce nter of gravity of fastener 
+group. i.c. : Instantaneous center of rotation. For slip-resistant joints Ri is equal to Rs where Rs = 
+mTi ). For other joints Ri  = (ri/rmax)Rult. 
+      ∑
+=
+=
+n
+i
+iSR
+1
+0sinϕ        () 3.13  
+      ∑
+=
+=−
+n
+i
+iS PR
+1
+0cosϕ       () 4.13  
+      ∑
+=
+=−+
+n
+i
+Si RrreP
+1
+0 0)(      () 5.13  
+Equation 13.3 and 13.4 are usually written as follows: 
+      ∑
+=
+=
+n
+i i
+i
+S
+r
+yR
+1
+0        () 6.13  
+      ∑
+=
+=−
+n
+i i
+i
+S PrxR 1 0        () 7.13  
+ 
+The solution to the problem is achieved if the value of ro satisfies all three 
+equilibrium equations. The procedure must be repeated until this condition is met.  
+A symmetric fastener pattern was used in Fig. 13.6, and the applied load was 
+normal to the axis of symmetry. In such s ituations the instantaneous center of rotation 
+must lie on the axis perpendicular to the applied load in order to satisfy Eq. 13.7. The 
+procedure also applies to the more genera l case where no axis of symmetry of the 
+fastener group exists or the applied load is acting in an arbitrary di rection, as in Fig. 
+13.5. 
+ 
+13.3.2 Ultimate Strength Analysis 
+ 
+A theoretical approach to predict the ultimate strength of an eccentrically loaded 
+fastener group was developed by Crawford and Kulak. 13.8 This approach considers 
+=== PDF page 237 ===
+224            Eccentrically Loaded Joints 
+ 
+the load versus deformation response of a single fastener as the basis for deter- 
+mining the ultimate strength of a fastener group. For a single fastener loaded in 
+double shear, this relationship has been expressed as 5.22  
+ 
+      λµ )1( ∆−−= eRR ult       () 8.13  
+ 
+in which R  = shear force on the bolt at any given deformation, ∆ 
+  ultR = the ultimate shear lo ad of the fastener 
+  ∆   = the shearing, bending, and bearing deformation of the fastener as  
+      as the local bearing deformation of the connecting plates    
+  λµ, = regression coefficients 
+  e  = base of natural logarithms 
+ 
+Numerical values for Rult,, λ, and µ  for various combinations of bolts and connected 
+material can be determined experimentally by means of special shear tests. A tension-
+type shear test has been recommended, sin ce it yields a lower bound to the ultimate 
+shear capacity  Rult of the bolt.4.4 
+The evaluation of the ultimate strength of an eccentrically loaded fastener group is 
+comparable to the analysis of similar slip-resistant joints (See Subsection 13.1.1). The 
+connection is assumed to rotate about an instantaneous center, and the connected plates 
+are assumed to remain rigid during this rotation. The latter assumption implies that the 
+deformation occurring at each fastener va ries linearly with its distance from the 
+instantaneous center. The fastener deform ation and the resulting shear load on the 
+fastener act perpendicularly to the radius  of rotation of the fastener. The ultimate 
+strength of the fastener group is assu med to be reached when the ultimate 
+deformation of the fastener farthest away from the instan taneous center is reached. 
+For a given fastener configuration and an eccentricity of the load equal to e, a trial 
+location of the instantaneous cente r can be selected at a distance r0  from the centroid 
+of the fastener group (see Fig. 13.6). The radius of rotation ri of the ith fastener is 
+given by Eq. 13.2. At the ultimate load of the entire connection, the shear 
+deformation of the critical fastener, located a distance rmax away from the 
+instantaneous center, is assumed to be equal to ∆max , the maximum fastener de-
+formation obtained from a single bolt shear test. 4.4, 5.22  The deformation of other 
+fasteners can then be determined from 
+      max
+max
+∆=∆ rrii         () 9.13  
+The fastener load corresponding to ∆i is readily obtained from Eq. 13.8. 
+Equilibrium of horizontal and vertical forces yields 
+=== PDF page 238 ===
+13.4  Comparison of Analytical and Experimental Results    225 
+ 
+     ;0=∑ xF   ∑
+=
+=
+n
+i
+iiR
+1
+0sinϕ     () 10.13  
+     ;0=∑ yF   ∑
+=
+=
+n
+i
+iiR
+1
+0cosϕ     () 11.13  
+The summation of moments around the instantaneous center yields a third equation 
+∑
+=
+=−+
+n
+i
+ii RrreP
+1
+0 0)(       () 12.13  
+Equations 13.10 and 13.11 can be conveniently  written in terms of the coordinates 
+xi , yi of the fastener, 
+∑
+=
+=−
+n
+1i i
+ii 0PryR         () 13.13  
+∑
+=
+=
+n
+1i i
+ii 0rxR          () 14.13  
+The solution is obtained when the trial value of r0 satisfies Eqs. 13.12, 13.13, 
+and 13.14 simultaneously. 
+ 
+13.4 COMPARISON OF ANALYTICAL AND EXPERIMENTAL RESULTS 
+ 
+The validity of the ultimate strength anal ysis has been checked by comparing  
+predicted results with experimental data . It was found that the predicted ultimate 
+loads for bolted specimens ranged between 5  and 14% higher than the observed 
+failure loads of the connections. 13.8 
+One of the reasons for this observed difference is that the deformation of the 
+critical fastener in the c onnection does not reach the maximum value observed in a 
+single bolt shear test. In the single bolt test, the load and deformation direction do 
+not change throughout the test. In the eccentrically loaded connection, the load and 
+deformation of each bolt are changing dir ection continuously as the instantaneous 
+center moves with an increase in applie d load. It was observed from tested  
+specimens that the bolt holes were deformed and scored by the circular movement 
+of the bolts relative to the plates. Hence, it is unlikely that the critical fastener in 
+the connection will deform as much as a single fastener loaded with a 
+unidirectional  force. 13.8 
+The predictions of the ultimate strength in Ref. 13.8 were based on load versus  
+deformation relationships determined from compression-type specimens. However,  
+failure of the fasteners was observed mainly in the tension region of the plates   
+(where the connected plates are subjected to tension). It was shown in Chapter 4
+=== PDF page 239 ===
+226            Eccentrically Loaded Joints 
+ 
+that a tension-type shear test generally yields lower shear values than a 
+compression-type shear test. 4.4  Since a compression-type shear test was used by 
+Crawford and Kulak, this may also have contributed to the overestimation of the 
+ultimate loads of the bolt groups reported in Ref. 13.8. 
+Only a few test results are available for eccentrically loaded slip-resistant con-
+nections.13.12 Figure 13.7 summarizes the load versus rotation curves for three 
+eccentrically loaded connecti ons fastened by ¾-in. dia. A325 bolts. The bolts were 
+installed by the turn-of-nut method in holes 1/16-in. greater in diameter than the 
+bolts. The faying surfaces were in  a clean mill scale condition. 
+ 
+Fig. 13.7.  Comparison of design recommendations  and test data for slip-resistant 
+eccentrically loaded joints. 
+=== PDF page 240 ===
+13.5 Design Recommendations           227 
+ 
+ 
+Predicted slip loads for these specimens were 30, 44, and 63 kips for 
+connections 1, 2, and 3, respectively. These predictions were based on measured 
+properties of the connection, including both the slip coefficient and the clamping 
+force. Neither connection 1 nor connecti on 3 showed any slip as the specimens 
+were loaded. Connection 1 did show an increased rate of rotation starting at a load 
+level of about 50 kips. Connection 3 had a fa irly stiff load versus rotation response 
+throughout. Connection 2 had an initial slip at a load level of 48 kips and 
+additional slips at 53 and 63 kips. The solid circular dots in Fig. 13.7 indicate the 
+permissible slip load for each specimen us ing the method outlined in this chapter. 
+A slip probability level of 5%  was selected (see Section 5.4).  
+Although the ultimate strength of an eccentr ically loaded fastener group of a 
+type as given in Figs. 13.l a and 13.2 can be evaluated within acceptable limits, 
+additional research is needed to be able  to predict the load versus deformation 
+behavior of such joints. Furthermore, re search on other types of connections, such 
+as shown in Fig. 13.1 b, is desirable to verify the ap plication of the analysis as 
+outlined in the previous section to these types of connections as well. 
+ 
+ 
+13.5 DESIGN RECOMMENDATIONS 
+ 
+13.5.1 Connected Material 
+ 
+The design of the plates used in eccentrical ly loaded joints doe s not involve special 
+design recommendations. To design the plate for the bracket connection shown in 
+Fig. 13.l a, the shear stress and normal stress at section AA due to the applied load P 
+should be checked. If relatively thin plates  are used, the out-of-plane deformations 
+due to instability effects may requi re an increased plate thickness. 
+The allowable stresses for these conditions depend on the plate material and the 
+type of loading. 
+ 
+13.5.2 Fasteners 
+ 
+Depending on the required performance of the joint, the permissible load can be 
+based on either the slip resistance or the ultimate strength of the connection. If the 
+latter basis is used (bearing-type connections), the design must be further 
+distinguished as to either allowable stress design or load factor design. 
+In all these cases, the method of analysis employing the determination of the 
+instantaneous center of rotation can be used. If the joint is to be slip-resistant, the 
+resistance of each bolt will be taken as that  established for the type of fastener, 
+surface condition of the connected material , and slip probability level (see Subsec-
+tion 5.4.2iii). In a bearing-type connectio n and under load factor design, the re-
+sistance of the most highly loaded fastener should be established at its ultimate 
+value (Subsection 5.4.2ii);  if allowable stress design is used, the resistance of the 
+most highly loaded fastener should be that corresponding to the allowable stress for 
+the bolt (Subsection 5.4.2i). 
+=== PDF page 241 ===
+228            Eccentrically Loaded Joints 
+ 
+In equation form, the results of the instantaneous center method of analysis can be 
+expressed as 
+ 
+      vCrP =          () 15.13  
+ 
+in which rv is the permissible load on a single fastener according to the description 
+above (that is, slip-resistant connection, or bearing-type connection under either 
+allowable stress design or load factor design), and P is the corresponding 
+permissible load on the connection acting at a given eccentricity and for a given 
+fastener arrangement. The nondimensional coefficient C provides the necessary 
+relationship between P and rv. 
+In developing the coefficients C for bearing-type connections for A325 and A490 
+bolts for slip-resistant connections, it was observed that the coefficients did not vary 
+greatly for the various cases. Accordingly,  it has become customary to tabulate 
+only one set of coefficients and apply it to all cases of eccentrically loaded con-
+nections. 13.13, 13.14  Table 13.1 shows a portion of the tabulated C values given in 
+Reference 13.13. The value of C obtained from Table 13.1 for a given geometry of 
+fasteners and eccentricity of load is to be  multiplied by the a ppropriate individual 
+bolt resistance (i.e., A325 or A490 bolt, slip-resistant or bearing-type joint, allow- 
+able stress design or load factor design). The coefficients tabulated were generated 
+taking the double shear strength of an A325 bolt as 74 kips and its ultimate de- 
+formation as 0.34 in. These were the values established in Reference 13.8, and they 
+were obtained from tests on bolts whose tensile strength was less than 1% greater 
+than the specified minimum value. 
+There are a number of ways of calculati ng the permissible eccentric loads for bolt 
+groups for which the C values are not tabulated. The most obvious way is to work from 
+first principles, using the method outlined in Section 13.3. Polynominal functions that 
+approximate the exact solution are also ava ilable for one- and two- fastener lines of 
+bolts.13.8 Some of these were contained in the first edition of this Guide. 13.15 More 
+recently, procedures have been published that identify a reasonable first choice for the 
+trial location of the instantaneous center and provide other computational shortcuts 
+that decrease the number of iterations required for a solution. 13.9 This is 
+particularly helpful if the load vector is not orthogonal with respect to the 
+centroidal axes of the bolt group. 
+The C values for rivets and A307 bolts can be developed on the basis of typical 
+load versus deformation curves for those fasteners. For convenience, the 
+permissible loads for connections empl oying these fastener types can be 
+conservatively  estimated using the C value for high-strength bolts. 
+The margins of safety implied by the use of the instantaneous center method of 
+analysis for eccentrically lo aded connections are consis tent with those of other 
+types of connections. They will be at about the same level as that for concentrically 
+loaded joints less than 50-in. long; that is, a factor of safety of about 2.0 in 
+allowable stress design and a safety index of about 4.5 in load factor design. 
+ 
+ 
+ 
+=== PDF page 242 ===
+Required minimum C= 
+vr
+P      
+ 
+ 
+P = C x rv 
+n = Total number of fasteners in the vertical row 
+P = Permissible load acting with lever arm l, inches 
+rv = Permissible on one fastener by Specification 
+C = Coefficients tabulated below. 
+ 
+n  
+l (inches) 2 3 4 5 6 7 8 9 10 11 12 
+b = 
+3 in 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+b = 
+6 in. 
+3 
+4 
+5 
+6 
+ 
+7 
+8 
+9 
+10 
+ 
+12 
+16 
+20 
+24 
+ 
+30 
+36 
+ 
+3 
+4 
+5 
+6 
+ 
+7 
+8 
+9 
+10 
+ 
+12 
+16 
+20 
+24 
+ 
+30 
+36 
+0.88 
+0.69 
+0.56 
+0.48 
+ 
+0.41 
+0.36 
+0.32 
+0.29 
+ 
+0.24 
+0.18 
+0.15 
+0.12 
+ 
+0.10 
+0.08 
+ 
+1.39 
+1.18 
+1.01 
+0.88 
+ 
+0.77 
+0.69 
+0.62 
+0.56 
+ 
+0.48 
+0.36 
+0.29 
+0.24 
+ 
+0.20 
+0.16 
+1.75 
+1.40 
+1.15 
+0.97 
+ 
+0.83 
+0.73 
+0.65 
+0.59 
+ 
+0.49 
+0.37 
+0.29 
+0.25 
+ 
+0.20 
+0.16 
+ 
+2.48 
+2.22 
+1.98 
+1.75 
+ 
+1.56 
+1.40 
+1.26 
+1.15 
+ 
+0.97 
+0.73 
+0.59 
+0.49 
+ 
+0.39 
+0.33 
+2.81 
+2.36 
+2.01 
+1.73 
+ 
+1.51 
+1.34 
+1.21 
+1.09 
+ 
+0.92 
+0.70 
+0.56 
+0.47 
+ 
+0.37 
+0.31 
+ 
+3.56 
+3.32 
+3.07 
+2.81 
+ 
+2.58 
+2.36 
+2.17 
+2.01 
+ 
+1.73 
+1.34 
+1.09 
+0.92 
+ 
+0.74 
+0.62 
+3.90 
+3.40 
+2.95 
+2.58 
+ 
+2.28 
+2.04 
+1.83 
+1.66 
+ 
+1.40 
+1.06 
+0.85 
+0.71 
+ 
+0.57 
+0.48 
+ 
+4.60 
+4.39 
+4.15 
+3.90 
+ 
+3.64 
+3.40 
+3.17 
+2.95 
+ 
+2.58 
+2.04 
+1.66 
+1.40 
+ 
+1.13 
+0.95 
+4.98 
+4.47 
+3.98 
+3.55 
+ 
+3.17 
+2.85 
+2.59 
+2.36 
+ 
+2.00 
+1.53 
+1.24 
+1.03 
+ 
+0.83 
+0.69 
+ 
+5.63 
+5.45 
+5.23 
+4.98 
+ 
+4.73 
+4.47 
+4.22 
+3.98 
+ 
+3.55 
+2.85 
+2.36 
+2.00 
+ 
+1.63 
+1.37 
+6.06 
+5.56 
+5.05 
+4.57 
+ 
+4.13 
+3.75 
+3.42 
+3.14 
+ 
+2.68 
+2.06 
+1.67 
+1.40 
+ 
+1.12 
+0.94 
+ 
+6.65 
+6.48 
+6.28 
+6.06 
+ 
+5.81 
+5.56 
+5.30 
+5.05 
+ 
+4.57 
+3.75 
+3.14 
+2.68 
+ 
+2.19 
+1.84 
+7.12 
+6.64 
+6.13 
+5.63 
+ 
+5.15 
+4.72 
+4.34 
+4.00 
+ 
+3.44 
+2.67 
+2.16 
+1.82 
+ 
+1.46 
+1.22 
+ 
+7.65 
+7.51 
+7.33 
+7.12 
+ 
+6.89 
+6.64 
+6.39 
+6.13 
+ 
+5.63 
+4.72 
+4.00 
+3.44 
+ 
+2.83 
+2.39 
+8.17 
+7.72 
+7.22 
+6.70 
+ 
+6.20 
+5.73 
+5.31 
+4.92 
+ 
+4.27 
+3.33 
+2.72 
+2.29 
+ 
+1.84 
+1.54 
+ 
+8.66 
+8.52 
+8.36 
+8.17 
+ 
+7.95 
+7.72 
+7.47 
+7.22 
+ 
+6.70 
+5.73 
+4.92 
+4.27 
+ 
+3.53 
+3.00 
+9.20 
+8.78 
+8.30 
+7.79 
+ 
+7.27 
+6.78 
+6.32 
+5.89 
+ 
+5.15 
+4.06 
+3.33 
+2.81 
+ 
+2.27 
+1.90 
+ 
+9.65 
+9.53 
+9.38 
+9.20 
+ 
+9.00 
+8.78 
+8.55 
+8.30 
+ 
+7.79
+6.78 
+5.89 
+5.15 
+ 
+4.30 
+3.66 
+10.2 
+9.84 
+9.38 
+8.87 
+ 
+8.36 
+7.85 
+7.36 
+6.90 
+ 
+6.09 
+4.85 
+3.99 
+3.37 
+ 
+2.73 
+2.29 
+ 
+10.7 
+10.5 
+10.4 
+10.2 
+ 
+10.0 
+9.84 
+9.61 
+9.38 
+ 
+8.87 
+7.85 
+6.90 
+6.09 
+ 
+5.12 
+4.38 
+11.3 
+10.9 
+10.4 
+9.96 
+ 
+9.44 
+8.93 
+8.42 
+7.94 
+ 
+7.06 
+5.68 
+4.70 
+3.99 
+ 
+3.24 
+2.72 
+ 
+11.6 
+11.5 
+11.4 
+11.3 
+ 
+11.1 
+10.9 
+10.7 
+10.4 
+ 
+9.96 
+8.93 
+7.94 
+7.86 
+ 
+5.98 
+5.18 
+Source: Manual of Steel Construction, Ei ghth Edition, American Institute of Steel 
+Construction, Chicago, 1980.
+
+=== PDF page 243 ===
+230            Eccentrically Loaded Joints 
+ 
+DESIGN RECOMMENDATIONS FOR ECCENTRICALLY LOADED 
+JOINTS 
+     vCrP =  
+where C = coefficient from Table 13.1, or si milar, or as calculated using 
+instantaneous center method of analysis 
+rv = permissible load per fastener (kips) according to method of design 
+(see the following) 
+ 
+ i. Slip-Resistant Connections.  If the connection is to be slip-resistant, pre- 
+loaded high-strength bolts must be used. In this case, the value r v shall be taken in 
+accordance with Subsection 5.4.2iii , except that the numb er of fasteners, n, is unity.  
+Thus, from Eq. 5.26, 
+      smeanispecv kDmTr =        () 16.13  
+The resistance per bolt can also be established using the alternative formulation 
+given in Subsection 5.4.2iii. 
+ 
+ii. Bearing-Type Connections: Allowable Stress Design. In the case of 
+bearing-type connections and using a llowable stress design, the recommended 
+permissible fastener stresses are 30 ksi fo r A325 bolts and 40 ksi for A490 bolts 
+(Subsection 5.4.2i ). These stresses multiplied by the shear area per bolt (single 
+shear or double shear, as appropriate, will give the resistance value to be used for 
+rv. If shear planes pass through the bolt threads, a reduction of 70% of the basic 
+value must be used. 
+ 
+iii. Bearing-Type Connections: Load Factor Design.  The value of rv to be used 
+when a bearing-type connection is designed using load factor procedures is given in 
+Subsection 5.4.2ii. For one bolt, 
+ 
+      bv FAmr φ=         () 17.13  
+ 
+where m = number of shear planes 
+φ  = a reduction factor, 0.80 
+F = 0.60 =uu σσ ( tensile strength of bolt) 
+Ab = cross-sectional area of bolt corresponding to the nominal diameter 
+  
+If shear planes pass through the bolt threads, 70% of the value calculated according 
+to Eq. 13.17 should be used. 
+ 
+REFERENCES 
+ 
+13.1   C. Reilly, “Studies of Iron Girder Bridges,” Proceedings of the Institute of Civil 
+Engineers, Vol. 29, 1870. 
+=== PDF page 244 ===
+References                231 
+ 
+ 
+13.2 T. R. Higgins, “Treatment of Eccentrically Loaded Connections in the AISC 
+Manual,” Engineering Journal, AJSC, Vol. 8, No. 2. April 1971. 
+13.3 “Eccentric Rivet Connections,” Engineering Record, Vol. 70, No. 19, November 7, 
+1914, P. 518. 
+13.4 E. Yarimci and R. G. Slutter, Results of Tests on Riveted Connections, Fritz Engineering 
+Laboratory, Report 200.63.401.1, Bethlehem, Pennsylvania, April 1963. 
+13.5 T. R. Higgins, “New Formula for Fasteners Loaded Off Center,” Engineering-News
+ Record, May 21, 1964. 
+13.6 A. L. Abolitz, “Plastic Design of Eccentrically Loaded Fasteners,” Engineering Journal, 
+AISC, Vol. 3, No. 3, July 1966. 
+13.7 C. L. Shermer, “Plastic Behavior  of Eccentrically-Loaded Connections,” 
+Engineering Journal, AISC, Vol. 8, No. 2, April 1971. (See also discussion by G. L. 
+Kulak, Vol. 8, No. 4, October 1971.) 
+13.8 S. F. Crawford and G. L. Kulak, “Eccentrically Loaded Bolted Connections,” Journal of 
+the Structural Division, ASCE, Vol. 97, ST3, March 1971. 
+13.9 G. D. Brandt, “Rapid Determination of Ultimate Strength of Eccentrically Loaded 
+Bolt Groups.” Engineering Journal, AISC, Second Quarter, 1982. 
+13.10 D. M. F. Orr, “The  Strength of Eccentrically Loaded Shear Connections,” Journal of 
+Constructional Steel Research, Vol. 2, No. 1, 1982. 
+13.11 C. G. Salmon and J. E. Johnson, Steel Structures, Design and Behavior, 2nd ed., Harper 
+and Row, New York, 1980. 
+13.12 G. L. Kulak, “Eccentrically Lo aded Slip-Resistant Connections,” Engineering Journal, 
+AISC, Vol. 12, No. 2, April 1975. 
+13.13 American Institute of Steel Construction, Manual of Steel Construction, 8th ed., AISC, 
+Chicago, Illinois, 1980. 
+13.14 Canadian Institute of Steel Construction, Handbook of Steel Construction , 4 th ed., 
+Rexdale, Ontario, 1985. 
+13.15 J. W. Fisher and J. H. A. Struik, Guide to Design Criteria for Bolted and Riveted Joints, 
+Wiley Interscience, New York, 1974. 

@@ -1,0 +1,5 @@
+PySide6>=6.5
+matplotlib>=3.7
+numpy>=1.24
+ideastatica_connection_api>=24.1   # official IDEA StatiCa Connection REST API client
+aiohttp                            # only needed for SDK "service runner" mode
