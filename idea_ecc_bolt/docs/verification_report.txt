@@ -1,4 +1,3 @@
-OpenBLAS WARNING - could not determine the L2 cache size on this system, assuming 256k
 VERIFICATION SUITE - Crawford & Kulak (1971) ICR method
 ==============================================================================
 [PASS] Brandt Ex.1 ultimate coefficient Cu
@@ -9,8 +8,8 @@ VERIFICATION SUITE - Crawford & Kulak (1971) ICR method
         expected: 1.10   got: 1.095
 [PASS] Brandt Ex.2 elastic coefficient Ce
         expected: 0.942   got: 0.943
-[PASS] C-table (308 entries, C&K/AISC-8th) max dev. at b=6", l=30", n=2
-        expected: 0.20   got: 0.195
+[PASS] C-table (16 entries, C&K/AISC-8th) max dev. at b=3", l=16", n=4
+        expected: 0.70   got: 0.695
 [PASS] Scale invariance C(2x geometry) = C
         expected: 1.4025   got: 1.4025
 [PASS] Concentric load limit C = n
@@ -18,7 +17,16 @@ VERIFICATION SUITE - Crawford & Kulak (1971) ICR method
 [PASS] IOM XML well-formed, bolt positions exported
         expected: 8   got: 8
 [PASS] REST pipeline vs mock IDEA service (bolt results)
-        expected: 8 bolts   got: 8 bolts, max util 0.982
+        expected: 8 bolts   got: 8 bolts, max util 0.749
+[PASS] REST pipeline reports bolt forces and capacity
+        expected: all bolts + capacity   got: capacity 401.1 kN, forces 82.0-109.5 kN
+[PASS] Badawi (1983), 10 full-size specimens: mean observed/ultimate load
+        expected: 1.05-1.16   got: 1.127
 ==============================================================================
-References: Crawford & Kulak, J. Struct. Div. ASCE 97(ST3), 1971;
-Brandt, Engineering Journal AISC Q2/1982; Kulak/Fisher/Struik Guide 2nd ed., Table 13.1.
+11/11 checks passed.
+Units of the solver: Crawford & Kulak, J. Struct. Div. ASCE
+97(ST3), 1971; Brandt, Engineering Journal AISC Q2/1982;
+Kulak/Fisher/Struik Guide 2nd ed. Table 13.1.
+Comparison with experiment: Badawi, M.Eng. thesis, McGill
+University 1983 (10 full-size specimens).  See
+eccbolt/benchmarks.py.

@@ -1,0 +1,9 @@
+# build / run artefacts
+.venv_build/
+.pybuild/
+.pytest_cache/
+smoke_gui.png
+out/
+
+# the built deliverable and its split parts are tracked on purpose
+# (windows_exe/EccentricBolt.exe, windows_exe/EccentricBolt.exe.00?)

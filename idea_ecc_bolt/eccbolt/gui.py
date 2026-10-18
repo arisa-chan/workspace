@@ -86,17 +86,24 @@ class IdeaWorker(QThread):
 
     def run(self):
         try:
-            from .idea_service import IdeaWorkflow
+            from .idea_service import IdeaSettings, IdeaWorkflow
             from .mock_service import MockIdeaService
             out = self.settings.get("out_dir", os.path.join(os.getcwd(), "out"))
             os.makedirs(out, exist_ok=True)
+            idea_settings = IdeaSettings(
+                mesh_max_element=self.settings.get("mesh_max") or None,
+                mesh_min_element=(self.settings.get("mesh_max") / 4.0
+                                  if self.settings.get("mesh_max") else None),
+                elements_per_plate=self.settings.get("elements_per_plate") or None,
+                detailing=self.settings.get("detailing"),
+                material_model=self.settings.get("material_model") or None)
             if self.settings.get("mock"):
                 with MockIdeaService() as svc:
                     self._log("Using built-in MOCK of the IDEA StatiCa Connection "
                               "REST API (offline demonstration).")
                     wf = IdeaWorkflow(base_url=svc.url, logger=self._log)
                     wf.connect()
-                    res = wf.analyse(self.ci, out_dir=out)
+                    res = wf.analyse(self.ci, out_dir=out, settings=idea_settings)
                     wf.close()
             else:
                 from eccbolt.idea_service import (IdeaImportError,
@@ -112,7 +119,8 @@ class IdeaWorker(QThread):
                     self.service_missing.emit(str(exc))
                     return
                 try:
-                    res = wf.analyse(self.ci, out_dir=out)
+                    res = wf.analyse(self.ci, out_dir=out,
+                                     settings=idea_settings)
                 except IdeaImportError as exc:
                     self.error = str(exc)
                     self.failed.emit(str(exc))
@@ -419,14 +427,16 @@ class MainWindow(QMainWindow):
                          ("M", "Moment at bolt group M"),
                          ("rult", "Bolt resistance Rult"),
                          ("Pcomp", "Load components Pv / Ph"),
-                         ("idea", "IDEA StatiCa")):
+                         ("idea", "IDEA StatiCa"),
+                         ("capacity", "Connection capacity (IDEA)")):
             self.lbl[key] = QLabel("-")
             self.lbl[key].setTextInteractionFlags(Qt.TextSelectableByMouse)
             fl.addRow(lab, self.lbl[key])
         vl.addWidget(g)
-        self.res_table = QTableWidget(0, 7)
+        self.res_table = QTableWidget(0, 8)
         self.res_table.setHorizontalHeaderLabels(
-            ["Bolt", "x", "y", "R/Rult @Pu", "F @P", "IDEA util.", "IDEA V"])
+            ["Bolt", "x", "y", "R/Rult @Pu", "F @P", "IDEA V", "IDEA N",
+             "IDEA util."])
         self.res_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         vl.addWidget(self.res_table, 3)
         self.chk_view = QPlainTextEdit(readOnly=True)
@@ -651,12 +661,13 @@ class MainWindow(QMainWindow):
             f"(vertical / horizontal)")
         self.lbl["idea"].setText(self.lbl["idea"].text())
         self.res_table.setRowCount(self.ci.n_bolts)
-        for i, ((bx, by), mag, sf) in enumerate(zip(
+        for i, ((bx, by), rr, sf) in enumerate(zip(
                 self.ci.bolts_xy, a.icr.bolt_magnitudes, a.service_magnitudes)):
             vals = [f"B{i+1}", f"{u.len(bx):.2f}", f"{u.len(by):.2f}",
-                    f"{mag:.3f}", f"{u.force(sf):.1f}",
-                    self.res_table.item(i, 5).text() if self.res_table.item(i, 5) else "",
-                    self.res_table.item(i, 6).text() if self.res_table.item(i, 6) else ""]
+                    f"{rr:.3f}", f"{u.force(sf):.1f}"]
+            for j in range(5, 8):
+                it = self.res_table.item(i, j)
+                vals.append(it.text() if it else "")
             for j, v in enumerate(vals):
                 self.res_table.setItem(i, j, QTableWidgetItem(str(v)))
         self.chk_view.setPlainText("\n".join(a.notes) or
@@ -689,9 +700,28 @@ class MainWindow(QMainWindow):
         testb = QPushButton("Test connection now")
         testb.clicked.connect(lambda: self._test_connection(url.text()))
         out = QLineEdit(self.settings.value("out_dir", os.path.join(os.getcwd(), "out")))
+        mesh = QDoubleSpinBox()
+        mesh.setRange(0.0, 100.0)
+        mesh.setDecimals(1)
+        mesh.setSuffix(" mm")
+        mesh.setValue(float(self.settings.value("mesh_max_mm", 0.0) or 0.0))
+        mesh.setToolTip("Maximum shell element size (0 = IDEA default)")
+        plates_el = QSpinBox()
+        plates_el.setRange(0, 200)
+        plates_el.setValue(int(self.settings.value("elements_per_plate", 0) or 0))
+        plates_el.setToolTip("Elements across an individual plate (0 = default)")
+        chk_detailing = QCheckBox("run the detailing checks")
+        chk_detailing.setChecked(self.settings.value("detailing", "1") == "1")
+        cmb_model = QComboBox()
+        cmb_model.addItems(["default", "biLinear", "multiLinear"])
+        cmb_model.setCurrentText(self.settings.value("material_model", "default"))
         fl.addRow("Service URL", url)
         fl.addRow("IDEA setup dir (runner mode)", setup)
         fl.addRow("Output directory", out)
+        fl.addRow("Mesh size", mesh)
+        fl.addRow("Elements per plate", plates_el)
+        fl.addRow("Material model", cmb_model)
+        fl.addRow(chk_detailing)
         fl.addRow(mock)
         fl.addRow(auto)
         fl.addRow(testb)
@@ -707,9 +737,18 @@ class MainWindow(QMainWindow):
         self.settings.setValue("mock", "1" if mock.isChecked() else "0")
         self.settings.setValue("auto_start", "1" if auto.isChecked() else "0")
         self.settings.setValue("out_dir", out.text())
+        self.settings.setValue("mesh_max_mm", str(mesh.value()))
+        self.settings.setValue("elements_per_plate", str(plates_el.value()))
+        self.settings.setValue("detailing", "1" if chk_detailing.isChecked() else "0")
+        self.settings.setValue("material_model", cmb_model.currentText())
         self._start_idea_worker(dict(
             base_url=url.text(), setup_dir=setup.text(), mock=mock.isChecked(),
-            auto_start=auto.isChecked(), out_dir=out.text()))
+            auto_start=auto.isChecked(), out_dir=out.text(),
+            mesh_max=mesh.value() / 1000.0 if mesh.value() else 0.0,
+            elements_per_plate=plates_el.value(),
+            detailing=chk_detailing.isChecked(),
+            material_model=(cmb_model.currentText()
+                            if cmb_model.currentText() != "default" else "")))
 
     def _start_idea_worker(self, settings):
         self._idea_worker = IdeaWorker(self.ci, settings)
@@ -775,19 +814,41 @@ class MainWindow(QMainWindow):
         self.lbl["idea"].setText(
             f"passed={res.passed}; bolts={len(res.bolts)}; "
             f"checks={len(res.checks)}")
+        if res.capacity is not None:
+            txt = f"{u.force(res.capacity):.1f} {u.u_force}"
+            if res.applied_load:
+                txt += (f"  (P = {u.force(res.applied_load):.1f} {u.u_force}"
+                        f", utilization "
+                        f"{res.applied_load/res.capacity:.2f})")
+            self.lbl["capacity"].setText(txt)
+        else:
+            self.lbl["capacity"].setText(
+                f"not available ({res.capacity_source})")
         lines = []
         for i, b in enumerate(res.bolts):
             if i < self.res_table.rowCount():
-                self.res_table.setItem(i, 5, QTableWidgetItem(
+                for col, val in ((5, b.shear_v), (6, b.normal_n)):
+                    self.res_table.setItem(i, col, QTableWidgetItem(
+                        f"{u.force(val):.1f}" if val is not None else "-"))
+                self.res_table.setItem(i, 7, QTableWidgetItem(
                     f"{b.unity_check:.3f}" if b.unity_check is not None else "-"))
-                self.res_table.setItem(i, 6, QTableWidgetItem(
-                    f"{u.force(b.shear_v):.1f}" if b.shear_v is not None else "-"))
+        if res.capacity is not None:
+            lines.append(f"Connection capacity: "
+                         f"{u.force(res.capacity):.1f} {u.u_force} "
+                         f"({res.capacity_source})")
+        if res.capacity_ck is not None:
+            lines.append(f"C*Rult from the service coefficient: "
+                         f"{u.force(res.capacity_ck):.1f} {u.u_force}")
+        if self.ana is not None:
+            lines.append(f"Crawford & Kulak Pu = C*Rult "
+                         f"(this program): {self.units.force(self.ana.Pu):.1f} "
+                         f"{self.units.u_force}")
         for c in res.checks:
             lines.append(c)
         for p in res.plates:
             lines.append(f"plate {p.name}: max stress "
                          f"{u.stress(p.max_stress or 0):.1f} {u.u_stress} "
-                         f"(ok={p.check_status})")
+                         f"(ok={p.ok})")
         if res.ideacon_path:
             lines.append(f"IDEA project: {res.ideacon_path}")
         if res.report_path:

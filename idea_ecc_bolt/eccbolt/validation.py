@@ -108,9 +108,64 @@ def run_checks(include_pipeline: bool = True, full_table: bool = False):
         add("REST pipeline vs mock IDEA service (bolt results)",
             f"{ci.n_bolts} bolts", f"{len(res.bolts)} bolts, max util "
             f"{max(util):.3f}", res.ok and len(res.bolts) == ci.n_bolts and max(util) <= 1.0001)
+        # per-bolt forces and the connection capacity must come back with it
+        ok = (res.applied_load is not None and res.capacity is not None
+              and all(b.shear_v is not None for b in res.bolts))
+        add("REST pipeline reports bolt forces and capacity",
+            "all bolts + capacity",
+            f"capacity {res.capacity/1e3:.1f} kN, forces "
+            f"{min(b.shear_v for b in res.bolts)/1e3:.1f}-"
+            f"{max(b.shear_v for b in res.bolts)/1e3:.1f} kN" if ok else "missing",
+            ok)
+
+    # 8 - experimental data (observed failure loads) ---------------------------
+    from .benchmarks import CK_BAND, compare_case, experimental_cases
+    comparisons = [compare_case(c) for c in experimental_cases()]
+    ratios = [c.analytical_ratio for c in comparisons]
+    mean = sum(ratios) / len(ratios)
+    add(f"Badawi (1983), {len(comparisons)} full-size specimens: "
+        f"mean observed/ultimate load",
+        f"{CK_BAND[0]:.2f}-{CK_BAND[1]:.2f}", f"{mean:.3f}",
+        CK_BAND[0] <= mean <= CK_BAND[1])
     return checks
 
 
+def format_report(checks, title="VERIFICATION SUITE - Crawford & Kulak (1971) ICR method"):
+    lines = [title, "=" * 78]
+    for name, exp, got, ok in checks:
+        lines.append(f"[{'PASS' if ok else 'FAIL'}] {name}")
+        lines.append(f"        expected: {exp}   got: {got}")
+    bad = sum(1 for *_, ok in checks if not ok)
+    lines.append("=" * 78)
+    lines.append(f"{len(checks) - bad}/{len(checks)} checks passed.")
+    lines.append("Units of the solver: Crawford & Kulak, J. Struct. Div. ASCE")
+    lines.append("97(ST3), 1971; Brandt, Engineering Journal AISC Q2/1982;")
+    lines.append("Kulak/Fisher/Struik Guide 2nd ed. Table 13.1.")
+    lines.append("Comparison with experiment: Badawi, M.Eng. thesis, McGill")
+    lines.append("University 1983 (10 full-size specimens).  See")
+    lines.append("eccbolt/benchmarks.py.")
+    return "\n".join(lines) + "\n"
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description="Verification suite")
+    ap.add_argument("--full-table", action="store_true",
+                    help="check all 308 tabulated C&K coefficients")
+    ap.add_argument("--no-pipeline", action="store_true",
+                    help="skip the REST pipeline check")
+    ap.add_argument("--report", metavar="PATH",
+                    help="also write the report to PATH")
+    args = ap.parse_args(argv)
+    checks = run_checks(include_pipeline=not args.no_pipeline,
+                        full_table=args.full_table)
+    report = format_report(checks)
+    print(report, end="")
+    if args.report:
+        with open(args.report, "w", encoding="utf-8") as fh:
+            fh.write(report)
+    return 1 if any(not ok for *_, ok in checks) else 0
+
+
 if __name__ == "__main__":
-    for name, exp, got, ok in run_checks(full_table=True):
-        print(f"[{'PASS' if ok else 'FAIL'}] {name}: expected {exp}, got {got}")
+    raise SystemExit(main())

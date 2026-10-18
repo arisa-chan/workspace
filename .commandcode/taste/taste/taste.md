@@ -1,0 +1,7 @@
+# Taste
+- Expects code fixes to be followed through to a rebuilt deliverable executable (`.exe`); a fix isn't "done" until the Windows executable is recompiled. Confidence: 0.5
+- Expects numerical/engineering programs to be validated against independent EXPERIMENTAL sources (published test data) rather than trusted on internal tests alone; explicitly rejects "validating" by comparison with other analytical/theoretical results (design-code tables, closed-form or modified methods) as meaningless. Confidence: 0.7
+- When computed results disagree with experimental data, expects the analysis/solver parameters (e.g. mesh size, material properties, check settings) to be tuned until agreement is reasonable — not merely for the mismatch to be reported. Confidence: 0.6
+- When a discrepancy or bug surfaces during validation, expects it to be fixed in the code — not merely reported or documented. Confidence: 0.6
+- Judges integration work by whether the expected objects genuinely exist in the target application (e.g. API-generated models must actually contain the bolts, holes and matching entries in the vendor tool's element tree), not by API calls returning success. Confidence: 0.6
+- Reports defects tersely and concretely — either pasting the full raw application/API output verbatim, or attaching a screenshot of the tool's output/GUI with a short numbered list of the specific problems ("(1) There are no bolts. (2) There are no bolt holes") — and expects the agent to diagnose the root cause and fix it in the code rather than just document it. Confidence: 0.5

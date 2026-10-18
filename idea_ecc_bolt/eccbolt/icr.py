@@ -57,9 +57,9 @@ def bolt_force_ratio(delta: float) -> float:
 class ICRResult:
     C: float                       # bolt-group coefficient  Pu = C * Rult
     ic: Tuple[float, float]        # instantaneous centre (in-plane, m)
-    bolt_forces: np.ndarray        # (n,2) bolt force vectors at Pu (same units as Rult)
-    bolt_magnitudes: np.ndarray    # (n,)  |R_i| at Pu
-    bolt_deformations: np.ndarray  # (n,)  delta_i [m]
+    bolt_forces: np.ndarray        # (n,2) R_i/Rult at Pu (dimensionless, same units as Rult)
+    bolt_magnitudes: np.ndarray    # (n,)  |R_i|/Rult at Pu (<= 0.9815)
+    bolt_deformations: np.ndarray  # (n,) delta_i [m]
     iterations: int
     unbalanced: float              # residual |F| of the equilibrium check
     elastic_C: Optional[float] = None
@@ -134,7 +134,7 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
     if ic0 is not None:
         de = bolts - ic0
         re = np.linalg.norm(de, axis=1)
-        mpe = abs(float(np.cross(ppoint - ic0, pdir)))
+        mpe = abs(float(cross2(ppoint - ic0, pdir)))
         elastic_C = float((de ** 2).sum() / (mpe * re.max()))
     if ic0 is None:
         # concentric load: uniform bolt forces
@@ -185,7 +185,10 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
     d, r, delta, f, mp, beta, resid = _state(bolts, ic, pdir, ppoint, delta_max)
     sense = -np.sign(mp)
     t = sense * np.stack([-d[:, 1], d[:, 0]], axis=1) / r[:, None]
-    bolt_vec = (f[:, None] * t) * beta          # R_i / Rult * Pu/Rult  (units of Rult)
+    # R_i / Rult at the ultimate load of the group.  The applied load at that
+    # state is Pu = C * Rult, so the force in bolt i at any load P is
+    #   F_i(P) = (R_i/Rult) * P/C   [same units as P]
+    bolt_vec = f[:, None] * t
     converged = float(np.linalg.norm(resid)) < 1e-6 and beta > 0
     return ICRResult(C=float(beta), ic=(float(ic[0]), float(ic[1])),
                      bolt_forces=bolt_vec,

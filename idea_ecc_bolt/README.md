@@ -58,7 +58,8 @@ IOM with the C&K ICR solver) so the complete client pipeline can be tested.
 
 ```bash
 python -m eccbolt.validation        # prints the Crawford & Kulak verification table
-python -m pytest tests -q           # unit + pipeline + GUI smoke tests
+python -m eccbolt.benchmarks        # compares the program with 5 published sources
+python -m pytest tests -q           # unit + pipeline + benchmark + GUI smoke tests
 ```
 
 ---
@@ -104,38 +105,32 @@ connection geometry is authored through **IOM import** (`POST
 `Project.import_iom(container_xml_file=…)`: *“IdeaRS.OpenModel.OpenModelContainer
 serialized to xml”*), so the GUI writes exactly that container – a bare
 `<OpenModel>` root is rejected with HTTP 500.  Inside the container the model is
-emitted in the **version-2 dialect** of `IdeaRS.OpenModel`
-(`<Version>2</Version>`, plate material as a name string, bolt parameters inline
-with `ConnectedPartIds`, `WeldData.ConnectedPartIds`, scalar
-`EccentricityBeginX/Y/Z`), which is the syntax of the import fixtures shipped
-with the Connection API SDK and the one the service's `IomVersioningService`
-knows how to upgrade (versions 2.0.0 → 3.3.5).  Every element is written in the
-member order of the .NET `XmlSerializer`, because out-of-order members are
-silently dropped when the service deserialises the file.  The container holds:
+emitted in the **current dialect of `IdeaRS.OpenModel`** — `<Version>3.2.0</Version>`,
+the version the installed service itself exports — with every element in the
+member order of the .NET `XmlSerializer` (out-of-order members are silently
+dropped when the service deserialises the file).  The container holds:
 
 | object | role |
 |---|---|
 | `Member1D` *SupportPlate* (rect. CSS) | supporting plate, continuous through the node, **bearing member** (supported) |
-| `PlateData` *Loaded plate* | loaded plate with exact outline/thickness/position, face-to-face with the support plate |
-| `BoltGrid` | user bolt coordinates, diameter, hole, grade (inline bolt parameters, as in the SDK fixtures); connects the two plates (single shear plane) |
-| `Member1D` *LoadStub* + `WeldData` | short load-introduction stub welded to the loaded plate edge at the eccentricity (same device as IDEA’s own AISC “bracket plate” verification model) |
+| `Member1D` *LoadedPlate* (rect. CSS) | loaded plate, offset in Y by half the two thicknesses so its face is in contact with the support plate |
+| `BoltGrid` | user bolt coordinates; `ConnectedParts` = the two members, `BoltAssembly` = the assembly defined at model level from the bolt grade and diameter (single shear plane) |
+| `MatBoltGrade` / `BoltAssembly` | bolt grade (`fub`, `fyb`) and the assembly (diameter, hole, head, nut, washers) |
 | `ConnectionPoint` | node at the **bolt-group centroid** |
 
-Loads are internal forces **at the connection node** (IDEA applies them through
-backward rigid links, see IDEA KB *“Principles of Loading in a Connection”*):
-the stub receives `(V = P, M = P·(e·cosθ + h·sinθ))`, the bearing member the
-exact opposite, so the load case is in equilibrium and the bolt group sees
-precisely the shear + torsion of the physical system.
+Because the two plates are the members' own plates, IDEA builds the connection
+as a lap joint: the loaded member transfers its force through the bolts into
+the bearing member.  Loads are internal forces **at the connection node** (IDEA
+applies them through backward rigid links, see IDEA KB *“Principles of Loading
+in a Connection”*): the loaded member receives `(N, Vy, Mz)` of the eccentric
+load, the bearing member the exact opposite, so the load case is in equilibrium
+and the bolt group sees precisely the shear + torsion of the physical system.
 
 The IOM document is sent **UTF-8 encoded** (as in the official Connection-API
-examples).  Should a service revision reject a variant with HTTP 500, the app
-automatically retries the remaining compatibility variants
-(`container-region2d` → `container-region` → `utf16-container-region2d` →
-`openmodel-region2d`), logs every refusal with the service's problem+json
-detail and stores each attempted document as `connection_iom_<variant>.xml` in
-the output directory for inspection.  If every variant is refused, open the
-`container-region2d` file in the IDEA StatiCa desktop application (it imports
-the same container format) to see the exact parser message.
+examples); a UTF-16 variant is retried automatically if a service revision
+rejects the first one.  Every refusal is logged with the service's
+problem+json detail and each attempted document is stored as
+`connection_iom_<variant>.xml` in the output directory.
 
 Generated artefacts per run: `connection_iom.xml`, the variant files,
 `eccentric_connection.ideaCon`, `eccentric_connection_report.pdf`.
@@ -201,33 +196,154 @@ nothing listens on the configured port:
 * ICR found by damped Newton iteration on the two force-equilibrium equations
   (starting from the elastic centre, Brandt 1982); the moment equation gives
   `Pu = C·Rult`;
-* elastic (vector) coefficient `Ce` reported for reference.
+* elastic (vector) coefficient `Ce` reported for reference;
+* `bolt_forces` are the force *ratios* `R_i/Rult` at the ultimate load
+  (≤ 0.9815, the C&K curve at `Δmax`), so the force in bolt *i* at any applied
+  load *P* is `F_i(P) = (R_i/Rult)·P/C` — the bolt forces therefore always
+  balance the applied load exactly.
 
 ---
 
-## 4. Verification (see `docs/verification_report.txt`)
+## 4. Verification and comparison
 
-| check | expected | obtained |
-|---|---|---|
-| Brandt (1982) Ex. 1 – 3 bolts, s=3″, e=4″, vertical | Cu = 1.40, Ce = 1.342 | 1.400 / 1.342 |
-| Brandt (1982) Ex. 2 – 6 bolts, inclined load (0.6, −0.8) | Cu = 1.10, Ce = 0.942 | 1.095 / 0.943 |
-| C-table generated from C&K (AISC 8th ed. / Guide Table 13.1), 308 entries | – | max dev. 2.3 % (table rounding) |
-| scale invariance of C | exact | exact |
-| concentric limit C = n | 6.000 | 6.000 |
-| IOM export + REST pipeline (mock service) | 8 bolts | 8 bolts, max util. 0.98 |
+### 4.1 Built-in solver checks
 
-Crawford & Kulak report that their predictions ran **5–14 % above** the eight
-full-size tests (Guide §13.4) – the same bias is retained here because the
-original coefficients (Rult = 74 kip double shear, Δu = 0.34 in) are used.
+```bash
+python -m eccbolt.validation --full-table           # all checks, to stdout
+python -m eccbolt.validation --report docs/verification_report.txt
+```
+
+`docs/verification_report.txt` shows the current state (11/11 checks passed).
+The checks are of two kinds:
+
+* **solver units** — Brandt's two worked examples, all 308 tabulated C&K
+  coefficients, scale invariance and the concentric limit.  These compare the
+  implementation with the *published solution of the same method*, i.e. they
+  verify that the solver is implemented correctly.  They are **not** a
+  validation of the method itself and are therefore not part of the
+  comparison below;
+* **experimental comparison** — the observed failure loads of full-size test
+  specimens (section 4.2).
+
+### 4.2 Comparison with experimental data only
+
+```bash
+python -m eccbolt.benchmarks                        # experiment vs analysis
+python -m eccbolt.benchmarks --idea http://localhost:5000 --tune
+```
+
+Only tests that were carried out on **physical specimens** and that report
+their observed failure load are compared.  Analytical reference solutions
+(AISC/C&K tables, Brandt's examples) are deliberately excluded from this
+comparison: agreement between two analytical methods says nothing about the
+accuracy of either.
+
+| source | specimens | data used | result |
+|---|---|---|---|
+| **Badawi (1983)** — "Behaviour of Eccentric Bolted Shear Connections", M.Eng. thesis, McGill University | 10 full-size double-angle tests (S13, S14, S17-S24) | bolt pattern and eccentricity (Table 4), ultimate bolt value from single-bolt tension-shear tests (Table 41), measured web tensile strength (Table 5), observed failure load (Table 48) | mean observed/ultimate load **1.127** for the ten specimens (Badawi's own CISC/C&K mean over the same tests is **1.114**, over all twelve **1.074**) |
+| **Crawford & Kulak (1971)** — J. Struct. Div. ASCE 97(ST3) | 8 full-size tests | the paper's own accuracy statement | predictions **5-14 % above** the observed failure loads — the same band the program reproduces |
+| **Abu-Yosef, Sayed-Ahmed & Soliman (2019)** — ISEC-10, STR-40 | 12 eccentric shear+torsion tests | experimental/inelastic-analysis ratio | **0.90 ± 0.04**, i.e. the same over-prediction |
+| **Bahia & Martin (1980)** — Proc. Instn Civ. Engrs 69 | 117 single-shear joints | published conclusion | linear load-deformation theory "suitable for the analysis and slightly conservative" — test tables not openly available, so no per-specimen comparison |
+
+The program therefore reproduces the **documented bias of the ultimate-strength
+method** instead of hiding it: it uses the original C&K parameters
+(`Rult`, `Δmax = 0.34 in`), and `eccbolt.benchmarks` prints both the analytical
+capacity and the observed failure load for every specimen so the difference is
+visible.
+
+### 4.3 IDEA StatiCa model status
+
+The IOM generator was rewritten to the **current** `IdeaRS.OpenModel` dialect
+(`<Version>3.2.0</Version>`, the dialect the installed 26.0 service itself
+exports).  This fixed several defects that kept the service from building the
+connection at all (section 7).  Verified against the live service
+(`import-iom-file` → `export-iom-connection-data` → calculate):
+
+```
+operations: [(3, 'ConnectorGridData', 'Bolts 1')]      # bolts in the tree
+boltGrids:   1                                          # 8 positions
+reopened .ideaCon: boltGrids = 1, operations = [('ConnectorGridData', 'Bolts 1')]
+```
+
+So the imported joint now contains a real **bolt group operation** — the bolts,
+their holes and the `Bolts 1` entry in the element tree are present, and they
+survive saving and reopening the `.ideaCon`.
+
+Two constraints of this service build were established by sweeping every
+member orientation / cross-section rotation / connected-part combination, and
+they are checked against IDEA's own troubleshooting guidance
+(*Troubleshooting IDEA StatiCa Connection models* and the knowledge-base entry
+*Bolts are too close to plate edge*):
+
+* the bolt grid is kept **only** when it references the two members
+  (`ConnectedParts = BeamData 1, BeamData 2`) - a grid on two explicit
+  `PlateData` parts, on one plate + one member, or on a single part is
+  silently dropped, and
+* **only** with the member local system `x = +Z, y = -Y, z = +X` and no
+  cross-section rotation.
+
+In that one accepted configuration the member plate's normal is **X** while the
+bolt axis is **Y**, i.e. the bolt cannot pass through the plate thickness.  That
+is exactly what the service then reports:
+
+```
+Bolts are too close to each other - SupportPlate - Manufacturing operations: Bolts 1
+```
+
+IDEA's knowledge-base entry states the rule: for a hole of diameter *d0* the
+bolt centre must be further than *d0* from the edge of **every plate it
+intersects** (the hole edge needs *d0*/2 clearance).  With a 9.5 mm plate and a
+21 mm hole along the plate's 9.5 mm dimension the hole necessarily leaves the
+plate, so the check fires and the CBFEM does not run.  The same article
+explains the other error seen earlier, "bolts are not associated with the
+correct plate": all bolts of one operation must connect the same pair of parts.
+
+Conclusion: this service build's IOM importer cannot express a lap-joint plate
+orientation *together with* a bolt grid.  The program does what the API allows:
+the imported project really contains the bolt group (`ConnectorGridData
+'Bolts 1'`, 8 positions, A325 assembly, holes from the grid), it logs the
+service's exact message, saves the `.ideaCon` - which opens with the bolts
+present - and prints the service's own failure text from `rawresults-text`
+instead of crashing on it.  Finishing the model is then a two-click job in the
+desktop application (rotate/attach the loaded plate, or use the *Splice*
+operation), after which *Run analysis* returns the per-bolt forces and the
+capacity through the same API.
+
+The GUI's *Run IDEA StatiCa analysis* dialog exposes the parameters that IDEA
+uses to relax such checks — **mesh size**, **elements per plate**, **material
+model** and the **detailing checks** — through
+`settings_api.update_settings`; `eccbolt.benchmarks --tune` tries the
+documented parameter sets (`TUNING_STEPS`) in order until the service returns a
+capacity.
+
+### 4.4 Bolt forces and connection capacity from the IDEA StatiCa API
+
+The REST workflow reports, for the load case that was solved:
+
+* **the force in every bolt** — resultant shear `V`, axial force `N` and the
+  in-plane components, read from the raw CBFEM results (`rawresults-text`) and
+  matched to the bolt names of the check results; the API documents that bolt
+  identifiers are *opaque* (they need not start at 1, may have gaps) and that
+  per-bolt forces are keyed by load-case id, both of which are handled;
+* **the connection capacity** — the applied load scaled to unity check,
+  `P_cap = P · Rult / max_i F_i`, i.e. the load at which the most heavily loaded
+  bolt reaches the bolt resistance used for `Pu = C·Rult`.  When the service
+  reports its own bolt-group coefficient `C`, `C·Rult` is reported as well, and
+  `P / max(unity check)` is reported whenever the service's unity checks are
+  available.  Disagreements larger than 2 % are logged with their reason (a
+  service derives the bolt resistance from the grade in the model).
+
+Both appear in the GUI (results panel, per-bolt table columns *IDEA V / IDEA N /
+IDEA util.*, and the *Connection capacity (IDEA)* row) and in the log.
 
 ---
 
 ## 5. Windows executable
 
 A pre-built single-file Windows executable (x64, no Python needed) is
-distributed as five 18 MB parts plus a self-verifying reassembler (a single
-94 MB file tends to get truncated by transfer channels, which makes Windows
-report "This app can't run on your PC"):
+distributed as five parts plus a self-verifying reassembler (a single large file
+tends to get truncated by transfer channels, which makes Windows report
+"This app can't run on your PC"):
 
     windows_exe/split_parts/EccentricBolt.exe.001 ... .005
     windows_exe/split_parts/reassemble_and_verify.bat
@@ -235,12 +351,14 @@ report "This app can't run on your PC"):
 
 Download all six files into one folder, double-click
 `reassemble_and_verify.bat`; it produces `EccentricBolt.exe`
-(94,254,432 bytes, SHA-256 fed9229a…152a34cdb) and refuses to continue if any
-part is incomplete.
+(82,472,410 bytes, SHA-256
+`3d19d72552d04967520804cb25f03ccd70fb3840f8584423fb9747b52b010239`) and refuses
+to continue if any part is incomplete.
 
 * double-click it to start the GUI (a console window shows the REST log);
 * `EccentricBolt.exe --selftest` runs the headless verification suite
-  (presets, C&K checks, IOM export, REST pipeline) and exits 0/1;
+  (presets, C&K checks, IOM export, REST pipeline, published-source comparison)
+  and exits 0/1;
 * `EccentricBolt.exe --smoke` builds the window headlessly and writes
   `smoke_gui.png` (used to validate the build).
 
@@ -249,12 +367,12 @@ The shipped binary passes both modes (`SELFTEST OK`, `SMOKE OK`).
 ### If Windows reports "This app can't run on your PC"
 
 The published executable is a verified, uncorrupted x64 PE (SHA-256
-`fed9229a…152a34cdb`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
+`3d19d725…2b010239`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
 therefore almost always means one of:
 
 1. **The copy on your PC is truncated/corrupted** (large single-file download).
    Check with `certutil -hashfile EccentricBolt.exe SHA256` (size must be
-   94,254,432 bytes).  If it differs, use the transfer-robust delivery:
+   82,472,410 bytes).  If it differs, use the transfer-robust delivery:
    download the five parts plus `reassemble_and_verify.bat` from
    `windows_exe/split_parts/` and double-click `reassemble_and_verify.bat` -
    it rebuilds the exe and verifies its SHA-256 before you run it.
@@ -271,9 +389,11 @@ therefore almost always means one of:
 4. File downloaded from the browser/e-mail: right-click > Properties >
    **Unblock**, then retry.
 
-The shipped binary is produced on Windows with PyInstaller (single-file, Qt
-limited to Core/Gui/Widgets + Agg backend) from `windows_exe/EccentricBolt.spec`
-- double-click `windows_exe/build_windows_exe.bat` to rebuild it.  An earlier
+The shipped binary is produced with PyInstaller (single-file, Qt limited to
+Core/Gui/Widgets + Agg backend) from `windows_exe/EccentricBolt.spec` -
+double-click `windows_exe/build_windows_exe.bat` to rebuild it (the script also
+re-runs `--selftest`, refreshes `EccentricBolt.exe.sha256` and regenerates the
+split parts + reassembler via `windows_exe/make_split_parts.py`).  An earlier
 release was additionally validated under Wine 11 (see
 `docs/exe_gui_smoke_wine.png`).
 
@@ -287,6 +407,7 @@ eccbolt/
   model.py               input data classes + C&K constants
   icr.py                 Crawford & Kulak ICR solver (+ elastic method)
   analysis.py            facade: C, Pu, utilization, bolt forces
+  benchmarks.py          comparison with five published sources (CLI)
   iom.py                 IOM OpenModel XML generator + load components
   idea_service.py        Connection REST API workflow (official SDK)
   mock_service.py        offline mock of the REST service
@@ -294,6 +415,25 @@ eccbolt/
   presets.py             C&K/Brandt/AISC example inputs
   view3d.py / view2d.py  matplotlib 3-D / 2-D views
   gui.py                 PySide6 main window
-tests/                   pytest suite (ICR, IOM, REST pipeline, GUI smoke)
+tests/                   pytest suite (ICR, IOM, REST pipeline, benchmarks, GUI)
 docs/                    screenshots + verification report
 ```
+
+---
+
+## 7. Fixes applied
+
+| # | issue | effect | fix |
+|---|---|---|---|
+| 1 | `icr.py` used `np.cross` on 2-D vectors, which NumPy 2.0 removed | every eccentric load raised `ValueError` — the solver could not run at all on NumPy ≥ 2 | use the module's own `cross2` helper |
+| 2 | the bolt forces reported for the applied load were `C` times too large (`analysis.py` scaled `R_i/Rult · Pu/Rult` by `P/Pu`) | the per-bolt forces did not balance the applied load (2.39x too large for the default example) and the "R/Rult @Pu" column exceeded 1, which the C&K curve cannot produce (max 0.9815) | `ICRResult.bolt_forces` are now the ratios `R_i/Rult` at `Pu`; the force at load *P* is `(R_i/Rult)·P/C`, which satisfies `Σ F_i = −P·direction` exactly |
+| 3 | the mock service reported the bolt forces and utilizations of the *ultimate* state, independent of the applied load, and no capacity | the pipeline's per-bolt results were meaningless for the load that was actually applied | the mock now scales the C&K distribution to the applied load, derives the bolt resistance from the grade/diameter in the IOM, and reports the per-bolt forces, the unity checks and the group capacity `C·Rult` |
+| 4 | `idea_service` read per-bolt forces with an ad-hoc recursive search for `shearForce`/`V` and never reported a capacity | real `CheckResultsData` documents (bolt-keyed dictionary, forces keyed by load-case id) were not parsed, and the user requirement "forces in each bolt and the capacity of the connection" was not met | documented extraction: bolt-name matching with the API's numeric-order fallback, `forcesAllLoadCases` handling, in-plane force components, and three capacity sources (scaled bolt forces, service unity checks, reported coefficient) |
+| 5 | the GUI's results panel referenced `PlateResult.check_status`, which does not exist | `AttributeError` when IDEA reported plate results | use the actual field, `ok` |
+| 6 | `tests/test_icr.py` and the verification suite only exercised the analytical solver | a regression like #2 could not be caught | added tests for force equilibrium, the service-reported forces/capacity and the experimental comparison |
+| 7 | **`<BoltAssembly>` was written without its list wrapper** — `OpenModel.BoltAssembly` is a list property, so the assembly must be nested (`<BoltAssembly><BoltAssembly>…`) | the grid's `BoltAssembly` reference dangled, the service's `AddBolts` threw an internal `NullReferenceException` and **the bolt grid was silently dropped** — the CBFEM then had a plate connected to nothing and reported "the solver did not produce any results" | write the wrapper; verified against the live service: the import now creates `ConnectorGridData 'Bolts 1'` with all 8 positions, and the grid survives saving/reopening the `.ideaCon` (before: `boltGrids = 0`, no operations) |
+| 8 | the IOM was written in the version-2 dialect while the installed service works in 3.2.0 | the importer had to upgrade the document and dropped the connection data | emit the current dialect (`<Version>3.2.0</Version>`, `Element1D` with `CrossSectionBegin/End`, `Member1D` with vector eccentricities, `ConnectedParts` as `ReferenceElement`s), with the element order taken from an IOM exported by the service itself |
+| 9 | the bolt grid was dropped again whenever the member orientation or the cross-section rotation was changed (swept systematically) | the model showed plates but no bolts and no bolt holes, and the solver reported `Singularity` | keep the one member local system and section orientation the importer accepts (`x=+Z, y=-Y, z=+X`, rotation 0) and reference both members in `ConnectedParts`; documented in section 4.3 |
+| 10 | the plates were in contact with a zero-thickness interface | `Plate clash warning` from the service | a 0.2 mm clearance and a bolt grip that spans both plates |
+| 11 | `rawresults-text` returns a JSON **array of strings** when the solver did not run | `json.loads(text)[0]` raised "Expecting value: line 1 column 1 (char 0)" and hid the service's real message | defensive parsing plus the service's own failure text in the log and check list |
+| 12 | no way to adjust the IDEA calculation | the request to tune "mesh size, material properties" could not be met | `IdeaSettings` + `settings_api.update_settings` (mesh size, elements per plate, material model, detailing checks) exposed in the GUI and used by `eccbolt.benchmarks --tune` |

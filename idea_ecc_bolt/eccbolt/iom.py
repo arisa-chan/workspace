@@ -1,43 +1,41 @@
 """
-Generation of an IDEA StatiCa Open Model (IOM) document describing the
-eccentrically loaded bolted shear connection, ready to be imported by the
+Generation of an IDEA StatiCa Open Model (IOM) document describing an
+eccentrically loaded bolted steel shear connection, ready to be imported by the
 IDEA StatiCa Connection REST API (``POST /api/N/projects/import-iom-file``).
 
 Document format
 ---------------
-The import endpoint expects an **``OpenModelContainer``** document (the
-container is what ``IdeaRS.OpenModel.Tools.OpenModelContainerToXml`` writes and
-what every official Connection-API example / SDK integration test uploads);
-a bare ``<OpenModel>`` root is rejected by the service.
+The document is written in the **current** ``IdeaRS.OpenModel`` dialect that the
+installed service itself exports (26.0 → ``<Version>3.2.0</Version>``).  The
+element names and their order were taken from an IOM exported by the service
+for a connection that contains bolt grids (``GET
+.../connections/{id}/export-iom``), because ``XmlSerializer`` silently drops
+every member that appears out of order:
 
-Inside the container the model is written in the *version 2* dialect of
-``IdeaRS.OpenModel`` - the syntax used by the official import fixtures shipped
-with the Connection API SDK (``IOM/OpenModelContainer.xml``,
-``ST_ConRestApiClient/Projects/OneConnectionImport.xml``):
+* top level: ``Version, OriginSettings, Point3D, LineSegment3D, ArcSegment3D,
+  PolyLine3D, Region3D, MatConcrete, MatReinforcement, MatSteel,
+  MatPrestressSteel, MatWelding, MatBoltGrade, MatHeadedStudGrade,
+  CrossSection, BoltAssembly, Pin, ... Element1D, Beam, Member1D, ...,
+  ConnectionPoint, Connections``;
+* ``Element1D`` carries the cross-section by reference
+  (``CrossSectionBegin``/``CrossSectionEnd``) and vector eccentricities;
+* ``BoltGrid`` is ``Id, Origin, AxisX/Y/Z, Positions, ConnectedParts
+  (ReferenceElement: BeamData/PlateData + Id), Length, ShearInThread,
+  BoltInteraction, BoltAssembly``;
+* ``PlateData`` is ``Id, Name, Thickness, Material, Origin, AxisX/Y/Z,
+  Geometry/Outline, OriginalModelId, IsNegativeObject``;
+* ``WeldData`` is ``Id, Name, Thickness, Material, WeldMaterial, WeldType,
+  IsIntermittent, ConnectedPartIds (original model ids as strings), Start, End``.
 
-* ``<Version>2</Version>`` - the service's ``IomVersioningService`` upgrades the
-  document from 2.0.0 to the version of the installed application (this is the
-  supported, tested upgrade path; declaring a *newer* version than the service
-  knows - or a hybrid document that claims to be current - makes the upgrade
-  steps fail, which surfaces as HTTP 500 "An unexpected error occurred");
-* ``PlateData/Material`` is the **material name** (a string), not a reference;
-* ``BoltGrid`` carries the bolt parameters inline (diameter, head, bore hole,
-  ...), the bolt grade as a plain ``<Material>`` name and ``ConnectedPartIds`` -
-  the ``OriginalModelId`` values of the connected objects.  ``MatBoltGrade`` and
-  ``BoltAssembly`` must **not** be written: upgrade step 2.0.5 builds both from
-  these grid parameters and fails with "an item with the same key has already
-  been added" if the lists are already there;
-* ``WeldData`` uses ``ConnectedPartIds`` as well;
-* ``Element1D`` eccentricities are the scalar ``EccentricityBeginX/Y/Z`` /
-  ``EccentricityEndX/Y/Z`` triplets (converted to vectors by upgrade step 3.0);
-* every element is emitted in the exact order in which ``XmlSerializer``
-  writes the corresponding ``IdeaRS.OpenModel`` class - out-of-order members
-  are silently dropped by the .NET deserializer.
-
-Model layout (unchanged): the supporting plate is a member with a solid
-rectangular cross-section (bearing member), the loaded plate is a
-``PlateData`` component, one ``BoltGrid`` connects them and a short
-load-introduction stub member is welded to the loaded plate edge.
+Model layout
+------------
+The connection is a **lap joint**: the supporting plate (bearing member) and the
+loaded plate are both modelled as members whose mid-surfaces are face to face,
+and one ``BoltGrid`` connects the two members' plates, i.e. exactly the
+single-shear load path of the physical specimen.  The load is applied to the
+loaded member through the Connection REST API (there is no load data in the
+IOM): the loaded member receives ``N/Vz/My``, the bearing member the exact
+opposite, so the bolt group sees the shear + torsion of the eccentric load.
 """
 from __future__ import annotations
 
@@ -48,11 +46,15 @@ from xml.sax.saxutils import escape
 
 from .model import ConnectionInput
 
+IOM_VERSION = "3.2.0"
+
+# clearance between the two plate faces [m] - see IomBuilder.layout()
+PLATE_GAP = 0.0
+
+
 # --------------------------------------------------------------------------
 # small XML helpers
 # --------------------------------------------------------------------------
-
-
 def _f(v: float) -> str:
     """Format a float the way .NET XmlSerializer does (round-trip)."""
     return repr(float(v))
@@ -105,35 +107,28 @@ class IomBuilder:
 
     # -- layout -----------------------------------------------------------
     def layout(self):
-        """Returns a dict with all derived geometry (SI units)."""
+        """Returns a dict with all derived geometry (SI units).
+
+        Both plates are members.  A small clearance is kept between the two
+        plate faces: IDEA turns a zero-thickness interface into a "plate clash"
+        warning (and then duplicates the bolts), while the bolts still transfer
+        the load across the clearance.
+        """
         ci = self.ci
         ta, tb = ci.plate_a.thickness, ci.plate_b.thickness
-        ya = 0.0                                  # plate A mid-surface
-        yb = ta / 2 + tb / 2                      # plate B mid-surface
-        yint = ta / 2                             # A/B interface (bolt plane)
-        tc = max(0.008, tb)                       # load stub thickness
-        yc = yb + tb / 2 + tc / 2                 # stub mid-surface
-        e = ci.load.e
-        h = ci.load.h_load
-        if h is None:
-            h = ci.plate_b.cy + ci.plate_b.height / 2   # top edge of plate B
-        return dict(ta=ta, tb=tb, tc=tc, ya=ya, yb=yb, yint=yint, yc=yc,
-                    e=e, h=h)
+        gap = PLATE_GAP
+        # the grid origin sits inside the first plate and the bolt spans the
+        # grip of both plates
+        return dict(ta=ta, tb=tb, gap=gap, y_bolt=0.0,
+                    y_loaded=ta / 2 + gap + tb / 2,
+                    bolt_len=ta / 2 + gap + tb + 0.005)
 
     # ----------------------------------------------------------------------
     def _materials_xml(self, country: str) -> Tuple[str, dict]:
-        """MatSteel list; returns (xml, material ids).
-
-        The bolt grade / bolt assembly are deliberately *not* written: upgrade
-        step 2.0.5 of the service creates ``MatBoltGrade`` and ``BoltAssembly``
-        from the parameters in the bolt grid (and fails if the document already
-        contains them), which is why the version-2 fixtures carry the grade as a
-        plain ``<Material>`` name inside the grid only.
-        """
+        """MatSteel list (+ MatBoltGrade / MatWelding); returns (xml, ids)."""
         ci = self.ci
-        mat_steel_cls = "MatSteelAISC" if country == "American" else "MatSteelEc2"
-        mats = []
-        mat_ids = {}
+        steel_type = "MatSteelAISC" if country == "American" else "MatSteelEc2"
+        mats, mat_ids = [], {}
         for plate in (ci.plate_a, ci.plate_b):
             key = (plate.material.designation, plate.material.fy, plate.material.fu)
             if key in mat_ids:
@@ -141,50 +136,118 @@ class IomBuilder:
             mid = len(mats) + 1
             mat_ids[key] = mid
             m = plate.material
-            diagram = "<DiagramType>Bilinear</DiagramType>" if mat_steel_cls == "MatSteelEc2" else ""
             mats.append(
-                f"<MatSteel xsi:type=\"{mat_steel_cls}\"><Id>{mid}</Id>"
+                f"<MatSteel xsi:type=\"{steel_type}\"><Id>{mid}</Id>"
                 f"<Name>{escape(m.designation)}</Name>"
                 "<LoadFromLibrary>false</LoadFromLibrary>"
                 f"<E>{_f(m.E)}</E><G>{_f(m.E / (2 * (1 + m.poisson)))}</G>"
                 f"<Poisson>{_f(m.poisson)}</Poisson><UnitMass>7850</UnitMass>"
-                "<SpecificHeat>0.6</SpecificHeat>"
+                "<SpecificHeat>490</SpecificHeat>"
                 "<ThermalExpansion>1.2E-05</ThermalExpansion>"
                 "<ThermalConductivity>45</ThermalConductivity>"
                 "<IsDefaultMaterial>false</IsDefaultMaterial><OrderInCode>0</OrderInCode>"
-                "<StateOfThermalExpansion>Code</StateOfThermalExpansion>"
-                "<StateOfThermalConductivity>Code</StateOfThermalConductivity>"
-                "<StateOfThermalSpecificHeat>Code</StateOfThermalSpecificHeat>"
-                "<StateOfThermalStressStrain>Code</StateOfThermalStressStrain>"
-                "<StateOfThermalStrain>Code</StateOfThermalStrain>"
+                "<StateOfThermalExpansion>None</StateOfThermalExpansion>"
+                "<StateOfThermalConductivity>None</StateOfThermalConductivity>"
+                "<StateOfThermalSpecificHeat>None</StateOfThermalSpecificHeat>"
+                "<StateOfThermalStressStrain>None</StateOfThermalStressStrain>"
+                "<StateOfThermalStrain>None</StateOfThermalStrain>"
+                "<UserThermalSpecificHeatCurvature><Points /></UserThermalSpecificHeatCurvature>"
+                "<UserThermalConductivityCurvature><Points /></UserThermalConductivityCurvature>"
+                "<UserThermalExpansionCurvature><Points /></UserThermalExpansionCurvature>"
+                "<UserThermalStrainCurvature><Points /></UserThermalStrainCurvature>"
+                "<UserThermalStressStrainCurvature />"
                 f"<fy>{_f(m.fy)}</fy><fu>{_f(m.fu)}</fu>"
-                f"<fy40>{_f(m.fy)}</fy40><fu40>{_f(m.fu)}</fu40>{diagram}</MatSteel>")
-        return "".join(mats), mat_ids
+                f"<fy40>{_f(m.fy)}</fy40><fu40>{_f(m.fu)}</fu40></MatSteel>")
+
+        grade = "MaterialBoltGradeAISC" if country == "American" else "MaterialBoltGradeEc2"
+        bm = ci.bolt_mat
+        bolt_grade = (
+            f"<MaterialBoltGrade xsi:type=\"{grade}\"><Id>1</Id>"
+            f"<Name>{escape(bm.designation)}</Name>"
+            "<LoadFromLibrary>false</LoadFromLibrary>"
+            f"<E>{_f(210e9)}</E><G>{_f(210e9 / 2.6)}</G>"
+            "<Poisson>0.3</Poisson><UnitMass>0</UnitMass>"
+            "<SpecificHeat>490</SpecificHeat><ThermalExpansion>1.4E-04</ThermalExpansion>"
+            "<ThermalConductivity>45</ThermalConductivity>"
+            "<IsDefaultMaterial>false</IsDefaultMaterial><OrderInCode>0</OrderInCode>"
+            "<StateOfThermalExpansion>None</StateOfThermalExpansion>"
+            "<StateOfThermalConductivity>None</StateOfThermalConductivity>"
+            "<StateOfThermalSpecificHeat>None</StateOfThermalSpecificHeat>"
+            "<StateOfThermalStressStrain>None</StateOfThermalStressStrain>"
+            "<StateOfThermalStrain>None</StateOfThermalStrain>"
+            f"<fub>{_f(bm.fub)}</fub><fyb>{_f(bm.fyb)}</fyb>"
+            f"<Elongation>0.18</Elongation><Code>{country}</Code>"
+            "</MaterialBoltGrade>")
+
+        weld_mat = ("<MatWelding><Id>1</Id><Name>E70xx</Name>"
+                    "<LoadFromLibrary>false</LoadFromLibrary>"
+                    f"<E>{_f(210e9)}</E><G>{_f(210e9 / 2.6)}</G>"
+                    "<Poisson>0.3</Poisson><UnitMass>7850</UnitMass>"
+                    "<SpecificHeat>490</SpecificHeat>"
+                    "<ThermalExpansion>1.2E-05</ThermalExpansion>"
+                    "<ThermalConductivity>45</ThermalConductivity>"
+                    "<IsDefaultMaterial>false</IsDefaultMaterial><OrderInCode>0</OrderInCode>"
+                    "<StateOfThermalExpansion>None</StateOfThermalExpansion>"
+                    "<StateOfThermalConductivity>None</StateOfThermalConductivity>"
+                    "<StateOfThermalSpecificHeat>None</StateOfThermalSpecificHeat>"
+                    "<StateOfThermalStressStrain>None</StateOfThermalStressStrain>"
+                    "<StateOfThermalStrain>None</StateOfThermalStrain>"
+                    f"<Fexx>{_f(483e6)}</Fexx></MatWelding>")
+        return "".join(mats), mat_ids, bolt_grade, weld_mat
 
     # ----------------------------------------------------------------------
-    def _open_model(self, plate_geometry: str = "region2d") -> str:
-        """The ``<OpenModel>`` element (no XML declaration), version-2 dialect.
+    def _bolt_assembly_xml(self) -> Tuple[str, float]:
+        """The ``<BoltAssembly>`` list of the OpenModel (container + item).
 
-        plate_geometry: 'region2d' (explicit Region2D outline - what the
-        official fixtures use) or 'region' (SVG path string).
+        The top-level ``<BoltAssembly>`` element is the *list* property of
+        ``OpenModel`` - the assembly itself is nested inside it, exactly like
+        ``<MatSteel><MatSteel …/></MatSteel>``.  Writing the item without its
+        wrapper leaves the bolt grid's ``BoltAssembly`` reference dangling and
+        the service then throws while importing the grid.
         """
         ci = self.ci
-        L = self.layout()
-        code = ci.design_code.upper()
-        country = "American" if code.startswith("AISC") else "ECEN"
+        d = ci.bolt_diameter
+        hole = d + ci.bolt_hole_clearance
+        ab = math.pi / 4 * d ** 2
+        at = 0.78 * ab
+        xml = (
+            "<BoltAssembly><BoltAssembly><Id>1</Id>"
+            f"<Name>{escape(ci.bolt_mat.designation)} {d*1000:.0f}</Name>"
+            f"<BoltGrade>{_ref('MaterialBoltGrade', 1)}</BoltGrade>"
+            f"<Diameter>{_f(d)}</Diameter><Borehole>{_f(hole)}</Borehole>"
+            f"<HeadDiameter>{_f(1.6 * d)}</HeadDiameter>"
+            f"<DiagonalHeadDiameter>{_f(1.7 * d)}</DiagonalHeadDiameter>"
+            f"<HeadHeight>{_f(0.65 * d)}</HeadHeight>"
+            f"<GrossArea>{_f(ab)}</GrossArea>"
+            f"<TensileStressArea>{_f(at)}</TensileStressArea>"
+            f"<NutThickness>{_f(0.8 * d)}</NutThickness>"
+            f"<WasherThickness>{_f(0.005)}</WasherThickness>"
+            "<WasherAtHead>true</WasherAtHead><WasherAtNut>true</WasherAtNut>"
+            "<LoadFromLibrary>false</LoadFromLibrary></BoltAssembly></BoltAssembly>")
+        return xml, ab
 
-        mats_xml, mat_ids = self._materials_xml(country)
+    # ----------------------------------------------------------------------
+    def _open_model(self) -> str:
+        ci = self.ci
+        L = self.layout()
+        country = "American" if ci.design_code.upper().startswith("AISC") else "ECEN"
+
+        mats_xml, mat_ids, bolt_grade, weld_mat = self._materials_xml(country)
+        bolt_assembly, _ = self._bolt_assembly_xml()
         mat_a = mat_ids[(ci.plate_a.material.designation, ci.plate_a.material.fy,
                          ci.plate_a.material.fu)]
         mat_b = mat_ids[(ci.plate_b.material.designation, ci.plate_b.material.fy,
                          ci.plate_b.material.fu)]
 
-        # ---- cross sections (rectangular plate members) ------------------
-        css_xml = []
-        for cid, (w, t, mref, nm) in enumerate([
-                (ci.plate_a.width, L['ta'], mat_a, "PL-A"),
-                (max(0.10, ci.plate_b.width * 0.5), L['tc'], mat_b, "PL-C")], start=1):
-            css_xml.append(
+        # ---- rectangular cross-sections (plate members) -------------------
+        #  With the member local system used below (x = +Z, y = -Y, z = +X)
+        #  the member plate spans local x-y, i.e. global Z-Y, and the CSS
+        #  "Height" becomes the plate thickness in X.  Height = w, Width = t
+        #  makes the member a plate-shaped body that contains the whole bolt
+        #  group (the service requires the bolt centres to lie inside every
+        #  plate they intersect - see "Bolts are too close to plate edge").
+        def css(cid, w, t, mref, nm):
+            return (
                 f"<CrossSection xsi:type=\"CrossSectionParameter\"><Id>{cid}</Id>"
                 f"<Name>{nm} {w*1000:.0f}x{t*1000:.0f}</Name>"
                 "<CrossSectionRotation>0</CrossSectionRotation>"
@@ -196,59 +259,65 @@ class IomBuilder:
                 f"<Value>{_f(w)}</Value></Parameter></Parameters>"
                 f"<Material>{_ref('MatSteel', mref)}</Material></CrossSection>")
 
+        css_xml = css(1, ci.plate_a.width, L['ta'], mat_a, "PL-A") + \
+                  css(2, ci.plate_b.width, L['tb'], mat_b, "PL-B")
+
         # ---- nodes / segments / elements / members -----------------------
-        za_top = ci.plate_a.cy + ci.plate_a.height / 2
-        za_bot = ci.plate_a.cy - ci.plate_a.height / 2
-        p_a_bot = self.add_point(0, 0, za_bot, "A_bot")
+        #  member 1: supporting plate, centred on the connection node
+        #  member 2: loaded plate, shifted in Y so its face touches member 1
+        p_a_bot = self.add_point(0, 0, -ci.plate_a.height / 2, "A_bot")
         p_node = self.add_point(0, 0, 0, "NODE")
-        p_a_top = self.add_point(0, 0, za_top, "A_top")
-        zc_top = L['h'] + 0.05
-        p_c_end = self.add_point(L['e'], L['yc'], zc_top, "C_end")
+        p_a_top = self.add_point(0, 0, ci.plate_a.height / 2, "A_top")
+        p_b_bot = self.add_point(0, L['y_loaded'],
+                                 -ci.plate_b.height / 2, "B_bot")
+        p_b_top = self.add_point(0, L['y_loaded'],
+                                 ci.plate_b.height / 2, "B_top")
 
-        seg_xml, el_xml, mem_xml = [], [], []
+        # local system: x along the member (+Z), y = -Y, z = +X (right handed).
+        #  This is the only member orientation for which this service build
+        #  keeps the bolt grid: with any other axes `import-iom-file` silently
+        #  drops the grid (no bolts, no holes, no operation in the tree).
+        lcs = ("<LocalCoordinateSystem xsi:type=\"CoordSystemByVector\">"
+               f"{_vec(0, 0, 1, 'VecX')}{_vec(0, -1, 0, 'VecY')}"
+               f"{_vec(1, 0, 0, 'VecZ')}</LocalCoordinateSystem>")
 
-        def segment(sid, p1, p2, lcs=True):
-            lcsx = ""
-            if lcs:
-                lcsx = ("<LocalCoordinateSystem xsi:type=\"CoordSystemByPoint\">"
-                        "<Point><Id>0</Id><X>100000</X><Y>0</Y><Z>0</Z></Point>"
-                        "<InPlane>ZX</InPlane></LocalCoordinateSystem>")
-            seg_xml.append(
-                f"<LineSegment3D><Id>{sid}</Id><StartPoint>{_ref('Point3D', p1)}"
-                f"</StartPoint><EndPoint>{_ref('Point3D', p2)}</EndPoint>{lcsx}"
-                "</LineSegment3D>")
+        def segment(sid, p1, p2):
+            return (f"<LineSegment3D><Id>{sid}</Id>"
+                    f"<StartPoint>{_ref('Point3D', p1)}</StartPoint>"
+                    f"<EndPoint>{_ref('Point3D', p2)}</EndPoint>{lcs}"
+                    "</LineSegment3D>")
+
+        seg_xml = [segment(1, p_a_bot, p_node), segment(2, p_node, p_a_top),
+                   segment(3, p_b_bot, p_node), segment(4, p_node, p_b_top)]
 
         def element(eid, sid, css_id):
-            # Element1D - member order as XmlSerializer writes it (version-2
-            # scalar eccentricities, converted by upgrade step 3.0)
-            el_xml.append(
-                f"<Element1D><Id>{eid}</Id><Name>E{eid}</Name>"
-                f"<Segment>{_ref('LineSegment3D', sid)}</Segment><RotationRx>0</RotationRx>"
-                "<EccentricityBeginX>0</EccentricityBeginX><EccentricityBeginY>0</EccentricityBeginY>"
-                "<EccentricityBeginZ>0</EccentricityBeginZ><EccentricityEndX>0</EccentricityEndX>"
-                "<EccentricityEndY>0</EccentricityEndY><EccentricityEndZ>0</EccentricityEndZ>"
-                "</Element1D>")
+            return (f"<Element1D><Id>{eid}</Id><Name>E{eid}</Name>"
+                    f"<CrossSectionBegin>{_ref('CrossSection', css_id)}</CrossSectionBegin>"
+                    f"<CrossSectionEnd>{_ref('CrossSection', css_id)}</CrossSectionEnd>"
+                    f"<Segment>{_ref('LineSegment3D', sid)}</Segment>"
+                    "<RotationRx>0</RotationRx>"
+                    f"{_vec(0, 0, 0, 'EccentricityBegin')}"
+                    f"{_vec(0, 0, 0, 'EccentricityEnd')}</Element1D>")
 
-        def member(mid, name, elem_ids, css_id, mtype):
+        el_xml = [element(1, 1, 1), element(2, 2, 1),
+                  element(3, 3, 2), element(4, 4, 2)]
+
+        def member(mid, name, elem_ids, mtype):
             refs = "".join(f"<ReferenceElement>{_ref('Element1D', e)}</ReferenceElement>"
                            for e in elem_ids)
-            mem_xml.append(
-                f"<Member1D><Id>{mid}</Id><Name>{name}</Name>"
-                f"<Elements1D>{refs}</Elements1D>"
-                f"<Member1DType>{mtype}</Member1DType>"
-                f"<CrossSection>{_ref('CrossSection', css_id)}</CrossSection>"
-                "<Alignment>Center</Alignment><MirrorY>false</MirrorY>"
-                "<MirrorZ>false</MirrorZ></Member1D>")
+            return (f"<Member1D><Id>{mid}</Id><Name>{name}</Name>"
+                    f"<Elements1D>{refs}</Elements1D>"
+                    f"<Member1DType>{mtype}</Member1DType>"
+                    "<Alignment>Center</Alignment><MirrorY>false</MirrorY>"
+                    "<MirrorZ>false</MirrorZ>"
+                    f"{_vec(0, 0, 0, 'EccentricityBegin')}"
+                    f"{_vec(0, 0, 0, 'EccentricityEnd')}"
+                    "<InsertionPoint>CenterOfGravity</InsertionPoint>"
+                    "<EccentricityReference>LocalCoordinateSystem</EccentricityReference>"
+                    "</Member1D>")
 
-        # member A (supporting plate): bottom->node->top, member C (load stub)
-        segment(1, p_a_bot, p_node)
-        segment(2, p_node, p_a_top)
-        segment(3, p_node, p_c_end)
-        element(1, 1, 1)
-        element(2, 2, 1)
-        element(3, 3, 2)
-        member(1, "SupportPlate", [1, 2], 1, "Column")
-        member(2, "LoadStub", [3], 2, "Beam")
+        mem_xml = [member(1, "SupportPlate", [1, 2], "Column"),
+                   member(2, "LoadedPlate", [3, 4], "Beam")]
 
         # ---- connection point -------------------------------------------
         conn_point = (
@@ -260,87 +329,45 @@ class IomBuilder:
             "<IsContinuous>false</IsContinuous><Length>0</Length></ConnectedMember>"
             "</ConnectedMembers><NodeId>0</NodeId></ConnectionPoint>")
 
-        # ---- beams (short member descriptions of the connection) ---------
+        # ---- beams -------------------------------------------------------
         def beam_data(bid, name, bearing):
-            return (f"<BeamData><Id>{bid}</Id><Name>{name}</Name><Plates />"
-                    f"<OriginalModelId>{bid}</OriginalModelId><Cuts />"
+            return (f"<BeamData><Id>{bid}</Id><Name>{name}</Name>"
+                    f"<OriginalModelId>Beam{bid}</OriginalModelId>"
                     "<IsAdded>false</IsAdded><AddedMemberLength>0</AddedMemberLength>"
                     "<IsNegativeObject>false</IsNegativeObject><MirrorY>false</MirrorY>"
-                    "<RefLineInCenterOfGravity>true</RefLineInCenterOfGravity>"
+                    "<MirrorZ>false</MirrorZ><RefLineInCenterOfGravity>false"
+                    "</RefLineInCenterOfGravity>"
                     f"<IsBearingMember>{'true' if bearing else 'false'}</IsBearingMember>"
                     "<AutoAddCutByWorkplane>false</AutoAddCutByWorkplane></BeamData>")
 
         beams_xml = ("<Beams>" + beam_data(1, "SupportPlate", True)
-                     + beam_data(2, "LoadStub", False) + "</Beams>")
+                     + beam_data(2, "LoadedPlate", False) + "</Beams>")
 
-        # ---- plate B (loaded plate) --------------------------------------
-        ob = ci.plate_b.outline()
-        x0, z0 = ob[0]
-        w, h = ci.plate_b.width, ci.plate_b.height
-        if plate_geometry == "region2d":
-            seg = ('<Segment2D xsi:type="LineSegment2D"><EndPoint>'
-                   '<X>{:.17g}</X><Y>{:.17g}</Y></EndPoint></Segment2D>')
-            geo = ("<Geometry><Outline><StartPoint><X>0</X><Y>0</Y></StartPoint>"
-                   "<Segments>"
-                   + seg.format(w, 0) + seg.format(w, h) + seg.format(0, h)
-                   + seg.format(0, 0)
-                   + "</Segments></Outline></Geometry>")
-        else:
-            geo = f"<Region>M 0 0 L {_f(w)} 0 L {_f(w)} {_f(h)} L 0 {_f(h)} L 0 0</Region>"
-        plates_xml = (
-            "<Plates><PlateData><Id>11</Id><Name>"
-            f"{escape(ci.plate_b.name)}</Name><Thickness>{_f(L['tb'])}</Thickness>"
-            f"<Material>{escape(ci.plate_b.material.designation)}</Material>"
-            "<OutlinePoints />"
-            f"<Origin><Id>0</Id><X>{_f(x0)}</X><Y>{_f(L['yb'])}</Y><Z>{_f(z0)}</Z></Origin>"
-            f"{_vec(1, 0, 0, 'AxisX')}{_vec(0, 0, 1, 'AxisY')}{_vec(0, -1, 0, 'AxisZ')}"
-            f"{geo}<OriginalModelId>11</OriginalModelId>"
-            "<IsNegativeObject>false</IsNegativeObject></PlateData></Plates>")
-
-        # ---- bolt grid (bolt parameters inline + connected part ids) ------
+        # ---- bolt grid ----------------------------------------------------
         d = ci.bolt_diameter
-        hole = d + ci.bolt_hole_clearance
-        ab_mm2 = math.pi / 4 * d ** 2 * 1e6        # gross area [mm2]
-        at_mm2 = 0.78 * ab_mm2                     # tensile stress area [mm2]
-        pos = "".join(
-            f"<Point3D><Id>0</Id><Name /><X>{_f(bx)}</X><Y>{_f(L['yint'])}</Y>"
-            f"<Z>{_f(by)}</Z></Point3D>"
-            for bx, by in ci.bolts_xy)
+        yb = L['y_bolt']
+        positions = "".join(
+            f"<Point3D><Id>{i+1}</Id><X>{_f(bx)}</X><Y>{_f(yb)}</Y>"
+            f"<Z>{_f(by)}</Z></Point3D>" for i, (bx, by) in enumerate(ci.bolts_xy))
+        parts = (f"<ReferenceElement>{_ref('BeamData', 1)}</ReferenceElement>"
+                 f"<ReferenceElement>{_ref('BeamData', 2)}</ReferenceElement>")
         bolts_xml = (
-            "<BoltGrids><BoltGrid><Id>41</Id>"
-            "<IsAnchor>false</IsAnchor><AnchorLen>0</AnchorLen>"
-            f"<HoleDiameter>{_f(hole)}</HoleDiameter><Diameter>{_f(d)}</Diameter>"
-            f"<HeadDiameter>{_f(1.6*d)}</HeadDiameter>"
-            f"<DiagonalHeadDiameter>{_f(1.7*d)}</DiagonalHeadDiameter>"
-            f"<HeadHeight>{_f(0.65*d)}</HeadHeight><BoreHole>{_f(hole)}</BoreHole>"
-            f"<TensileStressArea>{_f(at_mm2)}</TensileStressArea>"
-            f"<NutThickness>{_f(0.8*d)}</NutThickness>"
-            "<BoltAssemblyName /><Standard />"
-            f"<Material>{escape(ci.bolt_mat.designation)}</Material>"
-            f"<Origin><Id>0</Id><Name /><X>0</X><Y>{_f(L['yint'])}</Y><Z>0</Z></Origin>"
+            "<BoltGrids><BoltGrid><Id>1</Id>"
+            f"<Origin><Id>0</Id><X>0</X><Y>{_f(yb)}</Y><Z>0</Z></Origin>"
             f"{_vec(0, 1, 0, 'AxisX')}{_vec(0, 0, 1, 'AxisY')}{_vec(1, 0, 0, 'AxisZ')}"
-            f"<Positions>{pos}</Positions><ConnectedPlates />"
-            "<ConnectedPartIds><string>1</string><string>11</string></ConnectedPartIds>"
+            f"<Positions>{positions}</Positions>"
+            f"<ConnectedParts>{parts}</ConnectedParts>"
+            f"<Length>{_f(L['bolt_len'])}</Length>"
             f"<ShearInThread>{'true' if ci.threads_in_shear_plane else 'false'}</ShearInThread>"
-            "<BoltInteraction>Interaction</BoltInteraction></BoltGrid></BoltGrids>")
-
-        # ---- weld: load stub C to plate B (fillet weld along the contact) --
-        zw0 = max(0.0, L['h'] - 0.15)
-        welds_xml = (
-            "<Welds><WeldData><Id>31</Id>"
-            f"<Thickness>{_f(0.006)}</Thickness><WeldType>DoubleFillet</WeldType>"
-            "<ConnectedPartIds><string>11</string><string>2</string></ConnectedPartIds>"
-            f"<Start><Id>0</Id><Name /><X>{_f(L['e'])}</X>"
-            f"<Y>{_f(L['yb'] + L['tb']/2)}</Y><Z>{_f(zw0)}</Z></Start>"
-            f"<End><Id>0</Id><Name /><X>{_f(L['e'])}</X>"
-            f"<Y>{_f(L['yb'] + L['tb']/2)}</Y><Z>{_f(L['h'])}</Z></End>"
-            "</WeldData></Welds>")
+            "<BoltInteraction>Interaction</BoltInteraction>"
+            f"<BoltAssembly>{_ref('BoltAssembly', 1)}</BoltAssembly>"
+            "</BoltGrid></BoltGrids>")
 
         connection_xml = (
             "<Connections><ConnectionData>"
-            "<ConenctionPointId>1</ConenctionPointId>"
-            f"{beams_xml}{plates_xml}<FoldedPlates />{bolts_xml}"
-            f"<AnchorGrids />{welds_xml}<ConcreteBlocks /><CutBeamByBeams />"
+            f"<ConnectionPoint>{_ref('ConnectionPoint', 1)}</ConnectionPoint>"
+            f"{beams_xml}<Plates /><FoldedPlates />{bolts_xml}<AnchorGrids />"
+            "<Welds /><ConcreteBlocks /><CutBeamByBeams />"
             "</ConnectionData></Connections>")
 
         # ---- assemble -----------------------------------------------------
@@ -348,13 +375,12 @@ class IomBuilder:
                              for pid, x, y, z, nm in self.points)
         return (
             "<OpenModel>"
-            "<Version>2</Version>"
+            f"<Version>{IOM_VERSION}</Version>"
             "<OriginSettings>"
-            f"<ProjectName>EccentricBoltedShearConnection</ProjectName>"
+            "<ProjectName>EccentricBoltedShearConnection</ProjectName>"
             f"<ProjectDescription>{escape(ci.title)}</ProjectDescription>"
-            "<Author>EccentricBolt GUI</Author>"
             "<DateOfCreate>0001-01-01T00:00:00</DateOfCreate>"
-            "<CrossSectionConversionTable>SCIA</CrossSectionConversionTable>"
+            "<CrossSectionConversionTable>NoUsed</CrossSectionConversionTable>"
             f"<CountryCode>{country}</CountryCode>"
             "<ImportRecommendedWelds>false</ImportRecommendedWelds>"
             "<CheckEquilibrium>true</CheckEquilibrium>"
@@ -364,8 +390,11 @@ class IomBuilder:
             "<ArcSegment3D /><PolyLine3D /><Region3D />"
             "<MatConcrete /><MatReinforcement />"
             f"<MatSteel>{mats_xml}</MatSteel>"
-            "<MatPrestressSteel /><MatWelding />"
-            f"<CrossSection>{''.join(css_xml)}</CrossSection>"
+            f"<MatPrestressSteel />{weld_mat}"
+            f"<MatBoltGrade>{bolt_grade}</MatBoltGrade>"
+            "<MatHeadedStudGrade />"
+            f"<CrossSection>{css_xml}</CrossSection>"
+            f"{bolt_assembly}<Pin />"
             "<ReinforcedCrossSection /><HingeElement1D /><Opening /><DappedEnd />"
             "<PatchDevice />"
             f"<Element1D>{''.join(el_xml)}</Element1D>"
@@ -387,46 +416,28 @@ class IomBuilder:
             "</OpenModel>")
 
     # ----------------------------------------------------------------------
-    def build(self, plate_geometry: str = "region2d") -> str:
+    def build(self) -> str:
         """The OpenModelContainer document (UTF-8 declaration)."""
         return ('<?xml version="1.0" encoding="utf-8"?>\r\n'
                 '<OpenModelContainer xmlns:xsd="http://www.w3.org/2001/XMLSchema" '
                 'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\r\n'
-                + self._open_model(plate_geometry) + "\r\n"
+                + self._open_model() + "\r\n"
                 "<OpenModelResult />\r\n"
                 "</OpenModelContainer>\r\n")
 
     # ----------------------------------------------------------------------
     def variants(self):
-        """(label, xml_text) pairs, the format the Connection REST API
-        documents first: an OpenModelContainer with a Region2D plate outline.
-        The remaining entries are compatibility fallbacks (SVG plate region,
-        UTF-16 encoding, bare OpenModel) should a service revision reject the
-        preferred combination."""
-        return [
-            ("container-region2d", self.build(plate_geometry="region2d")),
-            ("container-region", self.build(plate_geometry="region")),
-            ("utf16-container-region2d",
-             self.build(plate_geometry="region2d").replace(
-                 'encoding="utf-8"', 'encoding="utf-16"')),
-            ("openmodel-region2d", self._bare_open_model()),
-        ]
+        """(label, xml_text) pairs tried in order by the REST workflow."""
+        return [("container-3.2.0", self.build()),
+                ("container-3.2.0-utf16",
+                 self.build().replace('encoding="utf-8"', 'encoding="utf-16"'))]
 
-    def _bare_open_model(self) -> str:
-        # fallback for a service that sniffs a bare OpenModel file: the
-        # namespace declarations live on the container otherwise
-        inner = self._open_model("region2d").replace(
-            "<OpenModel>",
-            '<OpenModel xmlns:xsd="http://www.w3.org/2001/XMLSchema" '
-            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">', 1)
-        return '<?xml version="1.0" encoding="utf-8"?>\r\n' + inner + "\r\n"
-
-    def build_bytes(self, variant: str = "container-region2d") -> bytes:
-        xml = dict((k, v) for k, v in self.variants())[variant]
-        enc = "utf-16" if variant.startswith("utf16") else "utf-8"
+    def build_bytes(self, variant: str = "container-3.2.0") -> bytes:
+        xml = dict(self.variants())[variant]
+        enc = "utf-16" if variant.endswith("utf16") else "utf-8"
         return xml.encode(enc)
 
-    def write(self, path: str, variant: str = "container-region2d") -> str:
+    def write(self, path: str, variant: str = "container-3.2.0") -> str:
         with open(path, "wb") as fh:
             fh.write(self.build_bytes(variant))
         return path
@@ -434,12 +445,20 @@ class IomBuilder:
 
 def member_load_components(ci: ConnectionInput):
     """Internal force components (N, Vy, Vz, Mx, My, Mz) in the local systems of
-    member A (support plate) and member C (load stub) that represent the
+    member 1 (support plate) and member 2 (loaded plate) that represent the
     eccentric load at the connection node.
 
-    Both members are vertical with the IOM ``CoordSystemByPoint``/ZX local
-    system used in :mod:`eccbolt.iom`, i.e.  x_local = +Z(global),
-    y_local = -Y(global), z_local = +X(global).
+    Both members use the IOM ``CoordSystemByVector`` local system of
+    :mod:`eccbolt.iom` (x_local = +Z, y_local = -Y, z_local = +X), so the
+    member forces of a load whose global components are ``F = (px, 0, pz)``
+    with the global moment ``M = (0, my_g, 0)`` are
+
+        n  =  Fz        vy =  0        vz = Fx
+        mx =  0         my = -my_g     mz = 0
+
+    The load acts at (e, h) in the connection plane and its line of action has
+    the perpendicular lever arm ``e*cos(theta) + h*sin(theta)`` from the
+    bolt-group centroid.
     """
     P = ci.load.P
     t = math.radians(ci.load.theta)
@@ -447,7 +466,7 @@ def member_load_components(ci: ConnectionInput):
     h = ci.load.h_load if ci.load.h_load is not None else (
         ci.plate_b.cy + ci.plate_b.height / 2)
     my_g = P * (ci.load.e * math.cos(t) + h * math.sin(t))   # about +Y global
-    # member C carries the load, member A the reaction
-    c = dict(n=pz, vy=0.0, vz=px, mx=0.0, my=-my_g, mz=0.0)
-    a = dict(n=-pz, vy=0.0, vz=-px, mx=0.0, my=my_g, mz=0.0)
-    return a, c
+    # member 2 carries the load, member 1 the reaction
+    loaded = dict(n=pz, vy=0.0, vz=px, mx=0.0, my=-my_g, mz=0.0)
+    support = dict(n=-pz, vy=0.0, vz=-px, mx=0.0, my=my_g, mz=0.0)
+    return support, loaded

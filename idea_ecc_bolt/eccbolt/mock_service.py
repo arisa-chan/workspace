@@ -28,7 +28,12 @@ import numpy as np
 
 from .icr import solve_from_eccentricity
 from .iom import parse_open_model
-from .model import CK_DELTA_MAX
+
+# nominal ultimate tensile strength of the bolt grades the IOM may name, used
+# by the mock to turn the C&K force ratios into forces (a real service reads
+# the same data from its own bolt library).
+BOLT_GRADES = {"A325": 825.0e6, "A490": 1035.0e6, "4.6": 400.0e6,
+               "8.8": 800.0e6, "10.9": 1000.0e6}
 
 
 class _State:
@@ -183,12 +188,35 @@ class MockHandler(BaseHTTPRequestHandler):
             return self._send(400, {"title": f"IOM parse error: {exc}"})
 
         bolts = []
+        bolt_d, rult = 0.019, 0.0
         bg = root.find("Connections/ConnectionData/BoltGrids/BoltGrid")
         if bg is not None:
             for p in bg.find("Positions"):
                 bolts.append((float(p.find("X").text), float(p.find("Z").text)))
-        load = dict(P=0.0, e=0.0, theta=0.0)
-        STATE_load = load
+            # current IOM dialect: diameter/grade live in the BoltAssembly and
+            # the bolt grade, which the grid references
+            d_el = bg.find("Diameter")
+            grade_el = bg.find("Material")
+            if d_el is None or grade_el is None:
+                asm = root.find("BoltAssembly/BoltAssembly")
+                if asm is not None:
+                    if d_el is None:
+                        d_el = asm.find("Diameter")
+                    if grade_el is None:
+                        grade = root.find("MatBoltGrade/MaterialBoltGrade")
+                        if grade is not None:
+                            fub_el = grade.find("fub")
+                            if fub_el is not None and fub_el.text:
+                                rult_fub = float(fub_el.text)
+                                dd = (float(d_el.text) if d_el is not None
+                                      and d_el.text else bolt_d)
+                                rult = 0.62 * rult_fub * math.pi / 4 * dd ** 2
+            if d_el is not None and d_el.text:
+                bolt_d = float(d_el.text)
+            if not rult and grade_el is not None:
+                fub = BOLT_GRADES.get((grade_el.text or "").strip(), 0.0)
+                if fub:
+                    rult = 0.62 * fub * math.pi / 4 * bolt_d ** 2
         pid = str(uuid.uuid4())
         members = [
             {"id": 1, "name": "SupportPlate", "isBearing": True, "isContinuous": True,
@@ -197,6 +225,7 @@ class MockHandler(BaseHTTPRequestHandler):
              "crossSectionId": 2, "connectedBy": "end"},
         ]
         STATE.projects[pid] = dict(iom=xml_bytes, bolts=bolts, members=members,
+                                   bolt_diameter=bolt_d, rult=rult,
                                    connections=[{"id": 1, "identifier": str(uuid.uuid4()),
                                                  "name": "CON1",
                                                  "analysisType": "stress_Strain",
@@ -210,44 +239,65 @@ class MockHandler(BaseHTTPRequestHandler):
 
 
 def finish_calc(pid):
-    """Evaluate the imported model with the C&K ICR method (mock CBFEM)."""
+    """Evaluate the imported model with the C&K ICR method (mock CBFEM).
+
+    Reported quantities mirror what a CBFEM service returns for the *applied*
+    load effect:
+
+    * per-bolt force at the applied load P (the C&K force distribution scaled
+      to P; the direction of every bolt force is preserved),
+    * per-bolt unity check = force at P / Rult,
+    * the ultimate load of the bolt group, Pu = C * Rult.
+    """
     proj = STATE.projects[pid]
     bolts = proj["bolts"]
     les = proj["load_effects"]
-    # member-local components of the load stub (vertical member, ZX LCS):
-    #   N -> global Z,  Vz -> global X,  My(local) = -My(global Y)
-    fx, fz, myl = 0.0, 0.0, 0.0
+    # member-local components of the loaded member.  Its local system is
+    # x = +Z(global), y = -Y(global), z = +X(global), so
+    #   n -> global Z,  vz -> global X,  my -> -global My
+    fx, fz, my_local = 0.0, 0.0, 0.0
     for le in les:
         for ml in le.get("memberLoadings") or []:
             sl = ml.get("sectionLoad") or {}
-            if ml.get("memberId") == 2:      # load stub carries the load
+            if ml.get("memberId") == 2:      # loaded member carries the load
                 fz += sl.get("n", 0.0)
                 fx += sl.get("vz", 0.0)
-                myl += sl.get("my", 0.0)
+                my_local += sl.get("my", 0.0)
     P = math.hypot(fx, fz)
     res = None
     if bolts and P > 0:
         pdir = (fx / P, fz / P)              # load direction in plane (x, z)
-        ecc = -myl / P                       # signed perpendicular eccentricity
+        ecc = -my_local / P                  # signed perpendicular eccentricity
         res = solve_from_eccentricity(bolts, pdir, ecc)
-    rult = 1.0
-    # per-bolt utilisation: force at applied load / Rult (C&K distribution)
+    rult = proj.get("rult") or 1.0
+    capacity = res.C * rult if (res is not None and res.C > 0) else None
+
     bolt_res = []
-    raw_bolts = []
+    raw_bolts = {}
     if res is not None and res.C > 0:
-        for i, mag in enumerate(res.bolt_magnitudes):
-            util = float(mag / res.C)        # R_i(P) / Rult
-            bolt_res.append({"name": f"B{i+1}", "unityCheck": round(util, 4),
+        # bolt_forces are the C&K force vectors at Pu scaled by Pu/Rult; at the
+        # applied load P the force vectors are those times P/Pu.
+        forces = res.bolt_forces * (P / res.C)
+        for i, fv in enumerate(forces):
+            mag = float(np.linalg.norm(fv))
+            util = float(mag / rult)
+            name = f"B{i+1}"
+            bolt_res.append({"name": name, "unityCheck": round(util, 4),
                              "checkStatus": util <= 1.0})
-            raw_bolts.append({"name": f"B{i+1}",
-                              "shearForce": {"x": 0.0, "z": float(mag) * 1.0},
-                              "normalForce": 0.0})
+            raw_bolts[name] = {
+                "name": name,
+                "unityCheck": {"1": round(util, 6)},
+                "forcesAllLoadCases": {
+                    "1": {"shearForce": {"x": float(fv[0]), "z": float(fv[1])},
+                          "normalForce": 0.0}},
+            }
     max_util = max([b["unityCheck"] for b in bolt_res], default=0.0)
+    passed = bool(max_util <= 1.0)
     proj["summary"] = [{
-        "id": 1, "passed": bool(max_util <= 1.0),
+        "id": 1, "passed": passed,
         "resultSummary": [
             {"name": "Bolt group (C&K ICR mock)", "checkValue": round(max_util, 4),
-             "checkStatus": bool(max_util <= 1.0), "loadCaseId": 1,
+             "checkStatus": passed, "loadCaseId": 1,
              "unityCheckMessage": f"utilization {max_util:.2f}", "skipped": False}]}]
     proj["checks"] = [{
         "id": 1, "connectionId": "1", "name": "CON1",
@@ -260,8 +310,15 @@ def finish_calc(pid):
              "maxStrain": 0.001, "maxStress": 210e6}],
         "checkResWeld": [], "checkResAnchor": [], "checkResConcreteBlock": [],
         "bucklingResults": [], "messages": None}]
-    proj["raw"] = [json.dumps({"C": (res.C if res else None),
-                               "bolts": raw_bolts})]
+    proj["raw"] = [json.dumps({
+        "connectionId": 1,
+        "checkResults": {"boltCheckResDataTimbers": raw_bolts},
+        "connectionCapacity": {
+            "coefficientC": (None if res is None else float(res.C)),
+            "boltResistance": float(rult),
+            "value": (None if capacity is None else float(capacity)),
+            "appliedLoad": float(P),
+            "source": "C&K instantaneous-centre-of-rotation (mock service)"}})]
 
 
 class MockIdeaService:

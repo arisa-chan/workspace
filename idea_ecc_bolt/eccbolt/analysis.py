@@ -35,8 +35,11 @@ def analyze(ci: ConnectionInput) -> AnalysisOutput:
     rult = ci.bolt_rult()
     icr = solve_icr(ci.bolts_xy, pdir, ppoint, delta_max=ci.bolt_mat.delta_max)
     Pu = icr.C * rult
-    scale = ci.load.P / Pu if Pu > 0 else 0.0
-    service = icr.bolt_forces * rult * scale
+    # R_i/Rult at Pu is independent of the load level; at the applied load P the
+    # force in bolt i is (R_i/Rult) * P/C  [N].  Pu = C*Rult is reached when the
+    # bolt farthest from the ICR is at delta_max, i.e. at 0.9815*Rult.
+    service = (icr.bolt_forces * (ci.load.P / icr.C) if icr.C > 0
+               else np.zeros_like(icr.bolt_forces))
     t = np.radians(ci.load.theta)
     e_eff = ci.load.e * math_cos(t) + h * math_sin(t)
     elastic = elastic_bolt_forces(ci.bolts_xy, pdir, e_eff) * ci.load.P

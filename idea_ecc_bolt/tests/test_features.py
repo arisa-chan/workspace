@@ -86,7 +86,37 @@ def test_mock_pipeline_handles_angled_load():
             res = wf.analyse(ci, out_dir=td, save_project=False,
                              save_report=False)
             wf.close()
-    assert res.raw is not None and res.raw["C"] == pytest.approx(direct, rel=1e-6)
+    cap = res.raw["connectionCapacity"]
+    assert cap["coefficientC"] == pytest.approx(direct, rel=1e-6)
+    assert res.capacity_ck == pytest.approx(direct * ci.bolt_rult(), rel=1e-9)
+
+
+def test_reported_bolt_forces_satisfy_equilibrium():
+    """The bolt forces read back from the service must balance the applied load
+    and must respect the C&K load-deformation limit (R <= 0.9815*Rult at Pu)."""
+    from eccbolt.idea_service import IdeaWorkflow
+    from eccbolt.mock_service import MockIdeaService
+    ci = crawford_kulak_example()
+    ana = analyze(ci)
+    with tempfile.TemporaryDirectory() as td:
+        with MockIdeaService() as svc:
+            wf = IdeaWorkflow(base_url=svc.url, logger=lambda s: None)
+            wf.connect()
+            res = wf.analyse(ci, out_dir=td, save_project=False,
+                             save_report=False)
+            wf.close()
+    exact = ci.load.P * ana.icr.bolt_magnitudes / ana.icr.C
+    for bolt, f in zip(res.bolts, exact):
+        assert bolt.shear_v == pytest.approx(f, rel=1e-6)
+    # the bolt forces must take the applied load into equilibrium
+    fx = sum(b.shear_components[0] for b in res.bolts)
+    fz = sum(b.shear_components[1] for b in res.bolts)
+    px, pz = ci.load.direction
+    assert fx == pytest.approx(-ci.load.P * px, abs=1e-6)
+    assert fz == pytest.approx(-ci.load.P * pz, abs=1e-6)
+    assert max(b.shear_v for b in res.bolts) < ci.bolt_rult()
+    assert res.applied_load == pytest.approx(ci.load.P)
+    assert res.capacity == pytest.approx(ana.Pu, rel=0.03)
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +132,13 @@ def test_angled_load_components(theta):
     px, pz = P * math.sin(t), -P * math.cos(t)          # global X, Z
     # global moment about the node = r x P with r = (e, 0, h)
     my_g = 0.25 * px - ci.load.e * pz
+    # member local system: x = +Z, y = -Y, z = +X
     assert c["n"] == pytest.approx(pz)
-    assert c["vz"] == pytest.approx(px)                 # horizontal component
+    assert c["vz"] == pytest.approx(px)                 # in-plane horizontal
     assert c["vy"] == pytest.approx(0.0)
-    assert c["my"] == pytest.approx(-my_g)              # local y = -global Y
+    assert c["my"] == pytest.approx(-my_g)
+    assert c["mx"] == pytest.approx(0.0)
+    assert c["mz"] == pytest.approx(0.0)
     # equilibrium between the two members
     for k in a:
         assert a[k] + c[k] == pytest.approx(0.0, abs=1e-9)

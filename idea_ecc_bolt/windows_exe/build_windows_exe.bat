@@ -14,13 +14,17 @@ echo [2/4] installing dependencies ...
 python -m pip install --upgrade pip
 pip install -r requirements.txt || goto :err
 pip install pyinstaller || goto :err
-echo [3/4] building single-file executable ...
+echo [3/5] building single-file executable ...
 pyinstaller --noconfirm --clean windows_exe\EccentricBolt.spec ^
     --distpath windows_exe --workpath .pybuild || goto :err
-echo [4/4] self test of the built executable ...
+echo [4/5] self test of the built executable ...
 windows_exe\EccentricBolt.exe --selftest || goto :err
+echo [5/5] hashing and splitting for transfer ...
+python windows_exe\make_split_parts.py || goto :err
 echo.
 echo DONE:  windows_exe\EccentricBolt.exe
+echo        windows_exe\EccentricBolt.exe.sha256
+echo        windows_exe\split_parts\  (5 parts + reassemble_and_verify.bat)
 pause
 exit /b 0
 :err
