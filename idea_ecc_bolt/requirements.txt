@@ -1,5 +1,12 @@
 PySide6>=6.5
 matplotlib>=3.7
 numpy>=1.24
+scipy>=1.10                        # Delaunay mesh with real bolt holes (FE fallback)
+# nonlinear FE fallback (plate/bolt/hole model)
+# Windows wheels for Python < 3.12 must be pinned: the 3.7 wrapper resolves to
+# an openseespywin binary built for Python 3.12 even on 3.11.
+openseespy==3.6.0.3; python_version < "3.12"
+openseespywin==3.6.0.3; sys_platform == "win32" and python_version < "3.12"
+openseespy>=3.8; python_version >= "3.12"
 ideastatica_connection_api>=24.1   # official IDEA StatiCa Connection REST API client
 aiohttp                            # only needed for SDK "service runner" mode

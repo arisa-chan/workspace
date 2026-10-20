@@ -30,3 +30,7 @@ Kulak/Fisher/Struik Guide 2nd ed. Table 13.1.
 Comparison with experiment: Badawi, M.Eng. thesis, McGill
 University 1983 (10 full-size specimens).  See
 eccbolt/benchmarks.py.
+
+C&K mu/lambda calibration: python -m eccbolt.calibration
+Nonlinear FE fallback check: python -m eccbolt.validation --fea
+(see docs/fea_verification_report.txt).

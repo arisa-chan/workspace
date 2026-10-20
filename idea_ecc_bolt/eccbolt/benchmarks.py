@@ -105,11 +105,68 @@ class ExperimentalCase:
             load=LoadSpec(P=self.failure_load * load_factor,
                           theta=0.0, e=self.eccentricity))
 
-    def analytical_capacity(self) -> float:
-        """Crawford & Kulak ultimate strength of the specimen [N]."""
-        c = solve_from_eccentricity(self.bolts_xy, (0.0, -1.0),
-                                    self.eccentricity).C
+    def analytical_capacity(self, mu=None, ck_lambda=None) -> float:
+        """Crawford & Kulak ultimate strength of the specimen [N].
+
+        The default uses the C&K parameters of the model class; calibrated
+        values can be supplied by the Calibrate command.
+        """
+        from .model import BoltMaterial
+        bm = BoltMaterial()
+        c = solve_from_eccentricity(
+            self.bolts_xy, (0.0, -1.0), self.eccentricity,
+            mu=bm.mu if mu is None else mu,
+            lam=bm.ck_lambda if ck_lambda is None else ck_lambda).C
         return c * self.bolt_rult
+
+    def fea_model(self, mesh: float = 0.008, plate_nonlinear: bool = True,
+                  **options) -> Dict:
+        """OpenSees model dictionary for the FE fallback."""
+        ci = self.connection_input()
+        pa, pb = ci.plate_a, ci.plate_b
+        model = {
+            "plate_a": dict(w=pa.width, h=pa.height, t=pa.thickness,
+                            cx=pa.cx, cy=pa.cy,
+                            E=pa.material.E, nu=pa.material.poisson,
+                            fy=pa.material.fy, fu=pa.material.fu),
+            "plate_b": dict(w=pb.width, h=pb.height, t=pb.thickness,
+                            cx=pb.cx, cy=pb.cy,
+                            E=pb.material.E, nu=pb.material.poisson,
+                            fy=pb.material.fy, fu=pb.material.fu),
+            "bolts": list(ci.bolts_xy),
+            "bolt_rult": ci.bolt_rult(),
+            "delta_max": ci.bolt_mat.delta_max,
+            "mu": ci.bolt_mat.mu,
+            "ck_lambda": ci.bolt_mat.ck_lambda,
+            "bolt_diameter": ci.bolt_diameter,
+            "hole_clearance": ci.bolt_hole_clearance,
+            "load": dict(P=ci.load.P, e=ci.load.e, h=0.0,
+                         theta=ci.load.theta),
+            "mesh": mesh,
+            "capacity_hint": max(self.analytical_capacity() * 1.6,
+                                 0.95 * ci.n_bolts * ci.bolt_rult()),
+            "num_steps": 80,
+            "plate_nonlinear": plate_nonlinear,
+            "plate_criterion": "nonlocal",
+            "perpendicular_force_factor": 0.5,
+        }
+        model.update(options)
+        return model
+
+    def fea_analysis(self, mesh: float = 0.008,
+                     plate_nonlinear: bool = True, **options) -> Dict:
+        """Full OpenSees fallback result for the specimen."""
+        from .fe_fallback import solve
+        return solve(self.fea_model(mesh=mesh,
+                                    plate_nonlinear=plate_nonlinear,
+                                    **options))
+
+    def fea_capacity(self, mesh: float = 0.008,
+                     plate_nonlinear: bool = True, **options):
+        """FE capacity [N], or ``None`` if no limit state was reached."""
+        res = self.fea_analysis(mesh=mesh, plate_nonlinear=plate_nonlinear,
+                                **options)
+        return res.get("capacity") if res.get("ok") else None
 
 
 def row(n, pitch):
@@ -176,6 +233,12 @@ def experimental_cases() -> List[ExperimentalCase]:
     return badawi_cases()
 
 
+def calibrate_ck_parameters(**kwargs):
+    """Lazy re-export of :func:`eccbolt.calibration.calibrate_ck_parameters`."""
+    from .calibration import calibrate_ck_parameters as _cal
+    return _cal(**kwargs)
+
+
 # ---------------------------------------------------------------------------
 # comparison
 # ---------------------------------------------------------------------------
@@ -185,6 +248,9 @@ class Comparison:
     analytical_capacity: float                 # N, C&K
     idea_capacity: Optional[float] = None      # N, from the IDEA StatiCa API
     idea_error: str = ""
+    fea_capacity: Optional[float] = None       # N, OpenSees fallback
+    fea_error: str = ""
+    fea_result: Dict[str, object] = field(default_factory=dict)
     settings: Dict[str, object] = field(default_factory=dict)
 
     @property
@@ -206,12 +272,35 @@ class Comparison:
         r = self.idea_ratio
         return None if r is None else ACCEPTANCE[0] <= r <= ACCEPTANCE[1]
 
+    @property
+    def fea_ratio(self) -> Optional[float]:
+        if not self.fea_capacity:
+            return None
+        return self.measured / self.fea_capacity
 
-def compare_case(case: ExperimentalCase, workflow=None, settings=None
-                 ) -> Comparison:
-    """C&K capacity of the specimen, plus the IDEA StatiCa capacity when a
-    connected workflow is supplied."""
+    @property
+    def fea_ok(self) -> Optional[bool]:
+        r = self.fea_ratio
+        return None if r is None else ACCEPTANCE[0] <= r <= ACCEPTANCE[1]
+
+
+def compare_case(case: ExperimentalCase, workflow=None, settings=None,
+                 fea: bool = False, fea_options=None) -> Comparison:
+    """C&K capacity of the specimen, plus the FE fallback and/or the IDEA
+    StatiCa capacity when requested."""
     comp = Comparison(case=case, analytical_capacity=case.analytical_capacity())
+    if fea:
+        try:
+            res = case.fea_analysis(**(fea_options or {}))
+            if res.get("ok") and res.get("capacity"):
+                comp.fea_capacity = res["capacity"]
+                comp.fea_result = res
+                comp.settings["fea_plate_model"] = res.get("plate_model")
+                comp.settings["fea_failure_mode"] = res.get("failure_mode")
+            else:
+                comp.fea_error = res.get("message", "no FE result")
+        except Exception as exc:
+            comp.fea_error = f"{type(exc).__name__}: {exc}"
     if workflow is None:
         return comp
     import tempfile
@@ -263,15 +352,32 @@ def tune_and_compare(case: ExperimentalCase, workflow,
 # reporting
 # ---------------------------------------------------------------------------
 def format_comparison(comparisons: Sequence[Comparison]) -> str:
-    lines = [f"{'specimen':8s} {'measured':>9s} {'C&K':>9s} {'m/C&K':>7s} "
-             f"{'IDEA':>9s} {'m/IDEA':>7s}  note"]
+    show_fea = any(c.fea_capacity or c.fea_error for c in comparisons)
+    show_idea = any(c.idea_capacity or c.idea_error for c in comparisons)
+    head = (f"{'specimen':8s} {'measured':>9s} {'C&K':>9s} {'m/C&K':>7s} ")
+    if show_fea:
+        head += f"{'FEA':>9s} {'m/FEA':>7s} "
+    if show_idea:
+        head += f"{'IDEA':>9s} {'m/IDEA':>7s} "
+    lines = [head + " note"]
     for c in comparisons:
-        idea = f"{c.idea_capacity/1e3:9.1f}" if c.idea_capacity else "        -"
-        ratio = f"{c.idea_ratio:7.3f}" if c.idea_ratio is not None else "      -"
-        note = c.idea_error or c.case.note
-        lines.append(f"{c.case.name:8s} {c.measured/1e3:9.1f} "
-                     f"{c.analytical_capacity/1e3:9.1f} "
-                     f"{c.analytical_ratio:7.3f} {idea} {ratio}  {note}")
+        line = (f"{c.case.name:8s} {c.measured/1e3:9.1f} "
+                f"{c.analytical_capacity/1e3:9.1f} "
+                f"{c.analytical_ratio:7.3f} ")
+        if show_fea:
+            fea = (f"{c.fea_capacity/1e3:9.1f}" if c.fea_capacity
+                   else "        -")
+            fr = (f"{c.fea_ratio:7.3f}" if c.fea_ratio is not None
+                  else "      -")
+            line += f"{fea} {fr} "
+        if show_idea:
+            idea = (f"{c.idea_capacity/1e3:9.1f}" if c.idea_capacity
+                    else "        -")
+            ir = (f"{c.idea_ratio:7.3f}" if c.idea_ratio is not None
+                  else "      -")
+            line += f"{idea} {ir} "
+        note = c.fea_error or c.idea_error or c.case.note
+        lines.append(line + f" {note}")
     return "\n".join(lines)
 
 
@@ -284,7 +390,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "http://localhost:5000 - runs the IDEA side as well")
     ap.add_argument("--tune", action="store_true",
                     help="try the documented parameter sets when IDEA fails")
+    ap.add_argument("--fea", action="store_true",
+                    help="also run the nonlinear OpenSees fallback")
+    ap.add_argument("--fea-mesh", type=float, default=0.008,
+                    help="FE target element size [m] (default 0.008)")
+    ap.add_argument("--fea-linear", action="store_true",
+                    help="use elastic plates in the FE fallback")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="calibrate mu/lambda against the specimens before "
+                         "the comparison")
     args = ap.parse_args(argv)
+
+    if args.calibrate:
+        from .calibration import calibrate_ck_parameters
+        result = calibrate_ck_parameters()
+        print(result.format())
+        print()
 
     cases = experimental_cases()
     workflow = None
@@ -295,8 +416,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         comparisons = []
         for case in cases:
-            comp = (tune_and_compare(case, workflow)
-                    if workflow and args.tune else compare_case(case, workflow))
+            if workflow and args.tune:
+                comp = tune_and_compare(case, workflow)
+                if args.fea:
+                    comp2 = compare_case(case, fea=True,
+                                         fea_options=dict(
+                                             mesh=args.fea_mesh,
+                                             plate_nonlinear=not args.fea_linear))
+                    comp.fea_capacity = comp2.fea_capacity
+                    comp.fea_error = comp2.fea_error
+                    comp.fea_result = comp2.fea_result
+            else:
+                comp = compare_case(
+                    case, workflow, fea=args.fea,
+                    fea_options=dict(mesh=args.fea_mesh,
+                                     plate_nonlinear=not args.fea_linear))
             comparisons.append(comp)
             print(f"  {case.name}: done")
         print()
@@ -308,6 +442,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"\nC&K vs experiment: mean {sum(ratios)/len(ratios):.3f} "
               f"(Crawford & Kulak report 5-14 % over-prediction, i.e. "
               f"{CK_BAND[0]:.2f}-{CK_BAND[1]:.2f}; Abu-Yosef et al. 0.90 +/- 0.04)")
+        fea = [c for c in comparisons if c.fea_ratio is not None]
+        if fea:
+            print(f"FEA vs experiment: {len(fea)}/{len(comparisons)} cases, "
+                  f"mean {sum(c.fea_ratio for c in fea)/len(fea):.3f}")
+        elif args.fea:
+            print("FEA vs experiment: no case produced a capacity - see the "
+                  "per-specimen note above")
         idea = [c for c in comparisons if c.idea_ratio is not None]
         if idea:
             print(f"IDEA vs experiment: {len(idea)}/{len(comparisons)} cases, "

@@ -1,0 +1,38 @@
+FEA FALLBACK - CHECK AGAINST PHYSICAL EXPERIMENTAL RESULTS
+==============================================================================
+Specimens: Badawi (1983), "Behaviour of Eccentric Bolted Shear Connections",
+M.Eng. thesis, McGill University - ten full-size double-angle tests.
+Measured failure loads from Table 48; bolt values from the single-bolt tests
+(Table 41); measured web Fu from Table 5.
+
+FE model: OpenSees plane-stress fallback with real holes (d + clearance),
+one-sided bearing contact, J2-plastic plates (elastic bearing/boundary zones),
+and the vector Crawford & Kulak bolt law with the original mu/lambda.
+Command: python -m eccbolt.benchmarks --fea
+
+specimen  measured       C&K   m/C&K       FEA   m/FEA  note
+S13          148.0     112.0   1.322     133.0   1.113  two-bolt group, B7 web
+S14          132.9      79.5   1.671      91.1   1.458  two-bolt group, B7 web
+S17          327.6     279.1   1.174     340.2   0.963  four bolts vertical, B9 web
+S18          170.1     159.0   1.070     348.3   0.488  four bolts vertical, B9 web
+S19          253.2     270.2   0.937     265.3   0.954  four bolts at 45 deg, B10 web
+S20          166.9     158.9   1.050     232.7   0.717  four bolts at 45 deg, B10 web
+S21          318.1     254.9   1.248     167.0   1.905  four bolts horizontal, B11 web
+S22          160.6     152.1   1.056      95.9   1.675  four bolts horizontal, B11 web
+S23          853.0    1178.6   0.724     681.1   1.252  3 x 3 grid at 75 mm, B12 web
+S24          689.0     676.3   1.019     506.1   1.362  3 x 3 grid at 75 mm, B12 web
+
+C&K vs experiment: mean 1.127
+FEA vs experiment: 10/10 cases, mean 1.189 (measured / FE capacity)
+
+Interpretation
+--------------
+The nonlinear fallback produces a capacity for every specimen and its mean
+bias (1.188) is of the same order as the classical C&K bias (1.127).  The
+per-specimen scatter is larger: the FE model is mesh-sensitive at the bearing
+zone, the J2 update has an automatic elastic fallback for locally singular
+bearing states, and S18/S21 are governed by the local plate criterion rather
+than by bolt shear.  The FE result is therefore reported as a fallback and not
+as a replacement for a commercial CBFEM calculation; the plate model actually
+used is printed with every result.
+==============================================================================

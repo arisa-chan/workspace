@@ -5,6 +5,8 @@ Usage:
     python main.py               launch the GUI
     python main.py --selftest    headless self test (analysis + verification
                                  suite + mock REST pipeline), exit code 0/1
+    python main.py --fea-selftest  headless check of the OpenSees fallback
+    python main.py --smoke       headless GUI smoke test
 """
 import os
 import sys
@@ -34,6 +36,23 @@ def selftest() -> int:
     return 0 if ok else 1
 
 
+def fea_selftest() -> int:
+    """Headless check that the bundled OpenSees fallback runs."""
+    from eccbolt.fe_fallback import model_from_connection, solve
+    from eccbolt.presets import crawford_kulak_example
+    ci = crawford_kulak_example()
+    model = model_from_connection(ci, mesh=0.02)
+    res = solve(model)
+    ok = bool(res.get("ok") and res.get("capacity"))
+    print(f"[fea] plate model: {res.get('plate_model')}")
+    print(f"[fea] failure mode: {res.get('failure_mode')}")
+    print(f"[fea] capacity: {res.get('capacity')}")
+    if not ok:
+        print(f"[fea] error: {res.get('message')}")
+    print("FEA SELFTEST", "OK" if ok else "FAILED")
+    return 0 if ok else 1
+
+
 def smoke() -> int:
     """Headless GUI smoke test: build the window, analyse, grab a PNG."""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -53,6 +72,8 @@ def smoke() -> int:
 def main():
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+    if "--fea-selftest" in sys.argv:
+        sys.exit(fea_selftest())
     if "--smoke" in sys.argv:
         sys.exit(smoke())
     from PySide6.QtWidgets import QApplication

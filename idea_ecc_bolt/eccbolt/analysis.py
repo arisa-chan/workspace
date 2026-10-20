@@ -33,7 +33,9 @@ def analyze(ci: ConnectionInput) -> AnalysisOutput:
         h = ci.plate_b.cy + ci.plate_b.height / 2
     ppoint = (ci.load.e, h)
     rult = ci.bolt_rult()
-    icr = solve_icr(ci.bolts_xy, pdir, ppoint, delta_max=ci.bolt_mat.delta_max)
+    icr = solve_icr(ci.bolts_xy, pdir, ppoint,
+                    delta_max=ci.bolt_mat.delta_max,
+                    mu=ci.bolt_mat.mu, lam=ci.bolt_mat.ck_lambda)
     Pu = icr.C * rult
     # R_i/Rult at Pu is independent of the load level; at the applied load P the
     # force in bolt i is (R_i/Rult) * P/C  [N].  Pu = C*Rult is reached when the

@@ -5,5 +5,7 @@
 smoke_gui.png
 out/
 
-# the built deliverable and its split parts are tracked on purpose
-# (windows_exe/EccentricBolt.exe, windows_exe/EccentricBolt.exe.00?)
+# the split parts are tracked on purpose; the complete 100+ MB exe is not
+# stored on GitHub (per-file limit), use the parts + reassemble script
+windows_exe/EccentricBolt.exe
+windows_exe/split_parts/EccentricBolt.exe

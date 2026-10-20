@@ -52,6 +52,10 @@ class Units:
         f = 1e-6 if self.metric else 1 / KSI
         return v_si * f if not to_si else v_si / f
 
+    def mu(self, v_si, to_si=False):
+        """C&K mu: stored in 1/m, displayed in 1/in."""
+        return v_si * INCH if not to_si else v_si / INCH
+
     @property
     def u_len(self):
         return "mm" if self.metric else "in"
@@ -147,6 +151,42 @@ class ValidationWorker(QThread):
                                          full_table=self.full))
 
 
+class FeaWorker(QThread):
+    log = Signal(str)
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, model, parent=None):
+        super().__init__(parent)
+        self.model = model
+
+    def run(self):
+        try:
+            from .fe_fallback import solve
+            self.log.emit("Running OpenSees FE fallback (bolt holes, "
+                          "clearance, J2 plates, vector C&K bolts)...")
+            self.finished_ok.emit(solve(self.model, verbose=False))
+        except Exception as exc:
+            import traceback
+            self.failed.emit(traceback.format_exc())
+
+
+class CalibrationWorker(QThread):
+    finished_ok = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def run(self):
+        try:
+            from .calibration import calibrate_ck_parameters
+            self.finished_ok.emit(calibrate_ck_parameters())
+        except Exception as exc:
+            import traceback
+            self.failed.emit(traceback.format_exc())
+
+
 # ---------------------------------------------------------------------------
 # main window
 # ---------------------------------------------------------------------------
@@ -211,6 +251,12 @@ class MainWindow(QMainWindow):
         act = QAction("Run &IDEA StatiCa analysis...", self)
         act.triggered.connect(self.run_idea)
         m_run.addAction(act)
+        act = QAction("Run &FE fallback (OpenSees)...", self)
+        act.triggered.connect(self.run_fea)
+        m_run.addAction(act)
+        act = QAction("&Calibrate C&&K parameters...", self)
+        act.triggered.connect(self.calibrate_ck)
+        m_run.addAction(act)
         act = QAction("Run &verification suite...", self)
         act.triggered.connect(self.run_validation)
         m_run.addAction(act)
@@ -225,7 +271,9 @@ class MainWindow(QMainWindow):
 
         tb = self.addToolBar("Main")
         for txt, fn in (("Analyze C&K", self.run_analytical),
+                        ("Run FE fallback", self.run_fea),
                         ("Run IDEA", self.run_idea),
+                        ("Calibrate", self.calibrate_ck),
                         ("Verify", self.run_validation),
                         ("Refresh view", self.update_views)):
             a = QAction(txt, self)
@@ -244,7 +292,7 @@ class MainWindow(QMainWindow):
     def _suffix(self, kind):
         return {"len": self.units.u_len, "force": self.units.u_force,
                 "stress": self.units.u_stress, "angle": "deg",
-                "dim": ""}.get(kind, "")
+                "mu": "1/in", "dim": ""}.get(kind, "")
 
     def _bind(self, spin, kind, getter, setter):
         self.fields.append((spin, kind, getter, setter))
@@ -261,6 +309,8 @@ class MainWindow(QMainWindow):
             val = self.units.force(val, to_si=True)
         elif kind == "stress":
             val = self.units.stress(val, to_si=True)
+        elif kind == "mu":
+            val = self.units.mu(val, to_si=True)
         for s, k, g, st in self.fields:
             if s is spin:
                 st(val)
@@ -335,6 +385,14 @@ class MainWindow(QMainWindow):
         self._bind(self.sp_dmax, "len", lambda: self.ci.bolt_mat.delta_max,
                    lambda v: setattr(self.ci.bolt_mat, "delta_max", v))
         fl.addRow("Bolt deformation delta_max", self.sp_dmax)
+        self.sp_mu = self._spin("mu", 3, 0.01, 1e6)
+        self._bind(self.sp_mu, "mu", lambda: self.ci.bolt_mat.mu,
+                   lambda v: setattr(self.ci.bolt_mat, "mu", v))
+        fl.addRow("C&K mu (10 = original)", self.sp_mu)
+        self.sp_lambda = self._spin("dim", 4, 0.01, 10.0)
+        self._bind(self.sp_lambda, "dim", lambda: self.ci.bolt_mat.ck_lambda,
+                   lambda v: setattr(self.ci.bolt_mat, "ck_lambda", v))
+        fl.addRow("C&K lambda (0.55 = original)", self.sp_lambda)
         lay.addWidget(g)
 
         # --- plates ---------------------------------------------------------
@@ -427,16 +485,18 @@ class MainWindow(QMainWindow):
                          ("M", "Moment at bolt group M"),
                          ("rult", "Bolt resistance Rult"),
                          ("Pcomp", "Load components Pv / Ph"),
+                         ("fea", "FE fallback (OpenSees)"),
+                         ("fea_capacity", "Connection capacity (FE)"),
                          ("idea", "IDEA StatiCa"),
                          ("capacity", "Connection capacity (IDEA)")):
             self.lbl[key] = QLabel("-")
             self.lbl[key].setTextInteractionFlags(Qt.TextSelectableByMouse)
             fl.addRow(lab, self.lbl[key])
         vl.addWidget(g)
-        self.res_table = QTableWidget(0, 8)
+        self.res_table = QTableWidget(0, 10)
         self.res_table.setHorizontalHeaderLabels(
             ["Bolt", "x", "y", "R/Rult @Pu", "F @P", "IDEA V", "IDEA N",
-             "IDEA util."])
+             "IDEA util.", "FE V", "FE util."])
         self.res_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         vl.addWidget(self.res_table, 3)
         self.chk_view = QPlainTextEdit(readOnly=True)
@@ -457,6 +517,8 @@ class MainWindow(QMainWindow):
                 v = self.units.force(v)
             elif kind == "stress":
                 v = self.units.stress(v)
+            elif kind == "mu":
+                v = self.units.mu(v)
             spin.blockSignals(True)
             spin.setValue(v)
             spin.setSuffix(" " + self._suffix(kind))
@@ -665,7 +727,7 @@ class MainWindow(QMainWindow):
                 self.ci.bolts_xy, a.icr.bolt_magnitudes, a.service_magnitudes)):
             vals = [f"B{i+1}", f"{u.len(bx):.2f}", f"{u.len(by):.2f}",
                     f"{rr:.3f}", f"{u.force(sf):.1f}"]
-            for j in range(5, 8):
+            for j in range(5, 10):
                 it = self.res_table.item(i, j)
                 vals.append(it.text() if it else "")
             for j, v in enumerate(vals):
@@ -863,6 +925,152 @@ class MainWindow(QMainWindow):
                              "Tip: enable the mock service in the dialog to "
                              "exercise the pipeline without an IDEA install.")
 
+    # ------------------------------------------------------- FE fallback
+    def run_fea(self):
+        if self.ci is None:
+            return
+        errs = self.ci.validate()
+        if errs:
+            self.log_view.appendPlainText("INPUT ERRORS:\n" + "\n".join(errs))
+            if not getattr(self, "suppress_dialogs", False):
+                QMessageBox.warning(self, "Input errors", "\n".join(errs))
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("OpenSees FE fallback")
+        fl = QFormLayout(dlg)
+        mesh = QDoubleSpinBox()
+        mesh.setRange(0.0, 100.0)
+        mesh.setDecimals(1)
+        mesh.setSuffix(" mm")
+        mesh.setValue(float(self.settings.value("fe_mesh_mm", 8.0)))
+        chk_nl = QCheckBox("nonlinear J2 plates")
+        chk_nl.setChecked(self.settings.value("fe_nonlinear", "1") == "1")
+        chk_gap = QCheckBox("model hole clearance (bearing gap)")
+        chk_gap.setChecked(self.settings.value("fe_gap", "1") == "1")
+        info = QLabel("Models the actual bolt holes, one-sided bearing with "
+                      "clearance and the vector C&K bolt law.")
+        info.setWordWrap(True)
+        fl.addRow(info)
+        fl.addRow("Mesh size", mesh)
+        fl.addRow(chk_nl)
+        fl.addRow(chk_gap)
+        hb = QHBoxLayout()
+        okb = QPushButton("Run")
+        okb.clicked.connect(dlg.accept)
+        hb.addWidget(okb)
+        fl.addRow(hb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        self.settings.setValue("fe_mesh_mm", str(mesh.value()))
+        self.settings.setValue("fe_nonlinear", "1" if chk_nl.isChecked() else "0")
+        self.settings.setValue("fe_gap", "1" if chk_gap.isChecked() else "0")
+        from .fe_fallback import model_from_connection
+        model = model_from_connection(
+            self.ci, mesh=mesh.value() / 1000.0 if mesh.value() else None,
+            plate_nonlinear=chk_nl.isChecked(),
+            contact_gap=chk_gap.isChecked())
+        self._fea_worker = FeaWorker(model)
+        self._fea_worker.log.connect(self._log)
+        self._fea_worker.finished_ok.connect(self._fea_done)
+        self._fea_worker.failed.connect(self._fea_failed)
+        self.statusBar().showMessage("Running OpenSees FE fallback...")
+        self._fea_worker.start()
+
+    def _fea_done(self, res):
+        u = self.units
+        if not res.get("ok") or not res.get("capacity"):
+            self._fea_failed(res.get("message", "no capacity"))
+            return
+        cap = res["capacity"]
+        self.lbl["fea"].setText(
+            f"{res.get('plate_model', '-')}; "
+            f"failure: {res.get('failure_mode', '-')}")
+        self.lbl["fea_capacity"].setText(
+            f"{u.force(cap):.1f} {u.u_force}  "
+            f"(P = {u.force(self.ci.load.P):.1f} {u.u_force}, "
+            f"util. {self.ci.load.P/cap:.2f})")
+        for i, b in enumerate(res.get("bolts", [])):
+            if i < self.res_table.rowCount():
+                self.res_table.setItem(i, 8, QTableWidgetItem(
+                    f"{u.force(b['magnitude']):.1f}"))
+                self.res_table.setItem(i, 9, QTableWidgetItem(
+                    f"{b['unity']:.3f}"))
+        lines = [f"FE capacity: {u.force(cap):.1f} {u.u_force}",
+                 f"plate model: {res.get('plate_model', '-')}",
+                 f"failure mode: {res.get('failure_mode', '-')}",
+                 f"max bolt deformation: "
+                 f"{res.get('max_bolt_deformation', 0)*1000:.3f} mm",
+                 f"hole clearance: "
+                 f"{res.get('hole_clearance', 0)*1000:.2f} mm"]
+        if res.get("notes"):
+            lines.append(str(res["notes"]))
+        self.chk_view.setPlainText("\n".join(lines))
+        self._log("\n".join(lines))
+        self.statusBar().showMessage("FE fallback finished.")
+
+    def _fea_failed(self, msg):
+        self._log("FE fallback FAILED: " + str(msg))
+        if not getattr(self, "suppress_dialogs", False):
+            QMessageBox.warning(self, "FE fallback",
+                                "The FE analysis did not produce a result.\n\n"
+                                + str(msg)[-1500:])
+
+    # -------------------------------------------------------- calibration
+    def calibrate_ck(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Calibrate Crawford & Kulak parameters")
+        vl = QVBoxLayout(dlg)
+        info = QLabel(
+            "Fits mu and lambda to the observed failure loads of the physical "
+            "specimens (Badawi 1983, ten full-size tests).  The original "
+            "values 10/in and 0.55 came from single-bolt tests, not from a "
+            "bolt group.")
+        info.setWordWrap(True)
+        vl.addWidget(info)
+        out = QPlainTextEdit(readOnly=True)
+        out.setMinimumHeight(280)
+        vl.addWidget(out)
+        hb = QHBoxLayout()
+        run = QPushButton("Run calibration")
+        apply = QPushButton("Apply && close")
+        apply.setEnabled(False)
+        close = QPushButton("Close")
+        hb.addWidget(run); hb.addWidget(apply); hb.addWidget(close)
+        vl.addLayout(hb)
+        state = {"res": None}
+
+        def _run():
+            run.setEnabled(False)
+            out.setPlainText("Calibrating ...")
+            self._cal_worker = CalibrationWorker()
+            self._cal_worker.finished_ok.connect(lambda r: _done(r))
+            self._cal_worker.failed.connect(
+                lambda t: out.setPlainText("Calibration failed:\n" + t))
+            self._cal_worker.start()
+
+        def _done(res):
+            state["res"] = res
+            out.setPlainText(res.format())
+            apply.setEnabled(True)
+            run.setEnabled(True)
+
+        def _apply():
+            if state["res"] is not None:
+                state["res"].apply(self.ci)
+                self._loading = True
+                self.sp_mu.setValue(self.units.mu(self.ci.bolt_mat.mu))
+                self.sp_lambda.setValue(self.ci.bolt_mat.ck_lambda)
+                self._loading = False
+                self._log(state["res"].format())
+                self.update_views()
+                dlg.accept()
+
+        run.clicked.connect(_run)
+        apply.clicked.connect(_apply)
+        close.clicked.connect(dlg.reject)
+        dlg.resize(760, 620)
+        dlg.exec()
+
     def run_validation(self):
         dlg = QDialog(self)
         dlg.setWindowTitle("Verification suite - Crawford & Kulak (1971)")
@@ -926,6 +1134,15 @@ class MainWindow(QMainWindow):
         if not p:
             return
         d = json.load(open(p))
+
+        def _plate(data):
+            data = dict(data)
+            mat = data.get("material")
+            if isinstance(mat, dict):
+                data["material"] = SteelMaterial(**mat)
+            return Plate(**data)
+
+        from .model import FemOptions
         ci = ConnectionInput(
             title=d.get("title", ""), design_code=d.get("design_code", "AISC"),
             bolts_xy=[tuple(b) for b in d.get("bolts_xy", [])],
@@ -933,8 +1150,9 @@ class MainWindow(QMainWindow):
             bolt_hole_clearance=d.get("bolt_hole_clearance", 0.002),
             n_shear_planes=d.get("n_shear_planes", 1),
             threads_in_shear_plane=d.get("threads_in_shear_plane", True),
-            plate_a=Plate(**d["plate_a"]), plate_b=Plate(**d["plate_b"]),
-            bolt_mat=BoltMaterial(**d["bolt_mat"]), load=LoadSpec(**d["load"]))
+            plate_a=_plate(d["plate_a"]), plate_b=_plate(d["plate_b"]),
+            bolt_mat=BoltMaterial(**d["bolt_mat"]), load=LoadSpec(**d["load"]),
+            fem=FemOptions(**d.get("fem", {})))
         self.set_model(ci)
 
     def export_iom(self):

@@ -33,7 +33,8 @@ def _bolts_row(n, b_in):
     return [(0.0, (i - (n - 1) / 2) * b_in * INCH) for i in range(n)]
 
 
-def run_checks(include_pipeline: bool = True, full_table: bool = False):
+def run_checks(include_pipeline: bool = True, full_table: bool = False,
+               include_fea: bool = False):
     checks: List[Tuple[str, str, str, bool]] = []
 
     def add(name, expected, got, ok):
@@ -127,6 +128,22 @@ def run_checks(include_pipeline: bool = True, full_table: bool = False):
         f"mean observed/ultimate load",
         f"{CK_BAND[0]:.2f}-{CK_BAND[1]:.2f}", f"{mean:.3f}",
         CK_BAND[0] <= mean <= CK_BAND[1])
+
+    # 9 - nonlinear FE fallback against the same physical specimens ----------
+    if include_fea:
+        from .benchmarks import compare_case as _compare
+        from .benchmarks import experimental_cases as _cases
+        fea = [_compare(c, fea=True) for c in _cases()]
+        got = [c for c in fea if c.fea_capacity]
+        ratios = [c.fea_ratio for c in got]
+        ok = len(got) == len(fea)
+        mean_fea = sum(ratios) / len(ratios) if ratios else float("nan")
+        add("FE fallback (holes, clearance, nonlinear plates) produces a "
+            "capacity for every specimen",
+            f"{len(fea)}/{len(fea)}", f"{len(got)}/{len(fea)}", ok)
+        add("FE fallback vs experiment: mean observed/capacity",
+            "0.70-1.50", f"{mean_fea:.3f}",
+            bool(ratios) and 0.70 <= mean_fea <= 1.50)
     return checks
 
 
@@ -154,11 +171,14 @@ def main(argv=None):
                     help="check all 308 tabulated C&K coefficients")
     ap.add_argument("--no-pipeline", action="store_true",
                     help="skip the REST pipeline check")
+    ap.add_argument("--fea", action="store_true",
+                    help="also check the OpenSees fallback against the "
+                         "physical test results")
     ap.add_argument("--report", metavar="PATH",
                     help="also write the report to PATH")
     args = ap.parse_args(argv)
     checks = run_checks(include_pipeline=not args.no_pipeline,
-                        full_table=args.full_table)
+                        full_table=args.full_table, include_fea=args.fea)
     report = format_report(checks)
     print(report, end="")
     if args.report:

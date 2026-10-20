@@ -2,13 +2,13 @@
 rem ============================================================
 rem  One-click builder: creates EccentricBolt.exe (single file)
 rem  Run this ON WINDOWS by double-clicking it.
-rem  Requires: Python 3.9-3.11 from python.org (with "Add to PATH").
+rem  Requires: Python 3.12 from python.org (with "Add to PATH").
 rem  Output:   windows_exe\EccentricBolt.exe  (runs without Python)
 rem ============================================================
 setlocal
 cd /d "%~dp0.."
 echo [1/4] creating virtual environment ...
-py -3.11 -m venv .venv_build || python -m venv .venv_build
+py -3.12 -m venv .venv_build || python -m venv .venv_build
 call .venv_build\Scripts\activate.bat
 echo [2/4] installing dependencies ...
 python -m pip install --upgrade pip

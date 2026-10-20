@@ -25,7 +25,8 @@ KIP = 4448.2216152605
 KSI = 6894757.2932
 MM = 0.001
 
-# Crawford & Kulak (1971) load-deformation parameters (inches, per bolt)
+# Crawford & Kulak (1971) load-deformation parameters (inches, per bolt).
+# CK_MU is kept in 1/in for reference; the model stores mu in 1/m (SI).
 CK_MU = 10.0          # regression coefficient mu  [1/in]
 CK_LAMBDA = 0.55      # regression coefficient lambda [-]
 CK_DELTA_MAX = 0.34   # ultimate bolt deformation   [in]
@@ -57,6 +58,28 @@ class BoltMaterial:
     # If None it is estimated as 0.62*fub*As*n_planes (C&K-type approximation).
     rult: Optional[float] = None   # N
     delta_max: float = CK_DELTA_MAX * INCH   # m, ultimate bolt deformation
+    # Crawford & Kulak load-deformation law parameters.  ``mu`` is stored in
+    # 1/m (the C&K value 10/in = 393.7/m); ``ck_lambda`` is dimensionless.
+    # Both can be changed by the user or by the Calibrate command.
+    mu: float = CK_MU / INCH                  # 1/m
+    ck_lambda: float = CK_LAMBDA              # -
+
+    @property
+    def lambda_(self) -> float:
+        """Alias for ``ck_lambda`` (``lambda`` is a Python keyword)."""
+        return self.ck_lambda
+
+    @lambda_.setter
+    def lambda_(self, value: float) -> None:
+        self.ck_lambda = float(value)
+
+    @property
+    def lam(self) -> float:
+        return self.ck_lambda
+
+    @lam.setter
+    def lam(self, value: float) -> None:
+        self.ck_lambda = float(value)
 
 
 @dataclass
@@ -105,6 +128,27 @@ class LoadSpec:
 
 
 @dataclass
+class FemOptions:
+    """Options for the OpenSees finite-element fallback.
+
+    The defaults model the real bolt holes (diameter d + clearance), the
+    nonlinear C&K bolt law and J2-plastic plates.  They can be overridden by
+    the GUI/JSON without changing the analytical C&K model.
+    """
+    mesh: Optional[float] = None           # m, target element size
+    triangulate: bool = True               # circular holes via Delaunay mesh
+    plate_nonlinear: bool = True           # J2 plasticity (False = elastic)
+    contact_gap: bool = True               # one-sided bearing with clearance
+    elastic_bearing_radius: float = 1.5    # x hole radius kept elastic
+    elastic_boundary_width: float = 0.05   # m, kept elastic near supports
+    perpendicular_force_factor: float = 0.5
+    plate_criterion: str = "nonlocal"
+    plate_stress_percentile: float = 0.95
+    plate_filter_radius: float = 2.0       # x hole radius
+    num_steps: int = 80
+
+
+@dataclass
 class ConnectionInput:
     """Complete definition of the eccentrically loaded bolted shear connection."""
     title: str = "Eccentrically loaded bolted shear connection"
@@ -118,6 +162,7 @@ class ConnectionInput:
     plate_b: Plate = field(default_factory=lambda: Plate("Loaded plate"))
     bolt_mat: BoltMaterial = field(default_factory=BoltMaterial)
     load: LoadSpec = field(default_factory=LoadSpec)
+    fem: FemOptions = field(default_factory=FemOptions)
 
     # ------------------------------------------------------------------ utils
     @property
@@ -156,8 +201,18 @@ class ConnectionInput:
                 errs.append(f"Plate {p.name}: dimensions must be positive.")
         if self.bolt_diameter <= 0:
             errs.append("Bolt diameter must be positive.")
+        if self.bolt_mat.mu <= 0:
+            errs.append("C&K parameter mu must be positive (1/m).")
+        if self.bolt_mat.ck_lambda <= 0:
+            errs.append("C&K parameter lambda must be positive.")
+        if self.bolt_mat.delta_max <= 0:
+            errs.append("Bolt deformation delta_max must be positive.")
         if self.load.P <= 0:
             errs.append("Load magnitude must be positive.")
+        if self.fem.mesh is not None and self.fem.mesh <= 0:
+            errs.append("FE mesh size must be positive.")
+        if not 0.0 < self.fem.plate_stress_percentile <= 1.0:
+            errs.append("Plate stress percentile must be in (0, 1].")
         return errs
 
 

@@ -191,16 +191,37 @@ nothing listens on the configured port:
 
 ## 3. Crawford & Kulak (1971) solver (`eccbolt/icr.py`)
 
-* load–deformation law `R = Rult·(1 − e^(−10·Δ))^0.55`, `Δmax = 0.34 in`;
+* load–deformation law `R = Rult·(1 − e^(−mu·Δ))^lambda`, `Δmax = 0.34 in`;
+* **`mu` and `lambda` are user inputs**: the model stores `mu` in `1/m` and
+  exposes it in the GUI as `1/in` (the original value is `10 1/in`; `lambda`
+  is `0.55`).  They can be edited per connection, saved in the JSON input and
+  changed by the Calibrate command;
 * rigid plates, bolt deformations ∝ distance from the ICR, forces ⊥ radius;
 * ICR found by damped Newton iteration on the two force-equilibrium equations
   (starting from the elastic centre, Brandt 1982); the moment equation gives
   `Pu = C·Rult`;
 * elastic (vector) coefficient `Ce` reported for reference;
 * `bolt_forces` are the force *ratios* `R_i/Rult` at the ultimate load
-  (≤ 0.9815, the C&K curve at `Δmax`), so the force in bolt *i* at any applied
-  load *P* is `F_i(P) = (R_i/Rult)·P/C` — the bolt forces therefore always
-  balance the applied load exactly.
+  (≤ 0.9815 at the original parameters), so the force in bolt *i* at any
+  applied load *P* is `F_i(P) = (R_i/Rult)·P/C` — the bolt forces therefore
+  always balance the applied load exactly.
+
+### 3.1 Calibrate (`Analysis → Calibrate C&K parameters`, `python -m eccbolt.calibration`)
+
+The original `mu = 10/in`, `lambda = 0.55` were fitted to **single-bolt**
+shear tests.  A bolt group has additional plate bearing, bolt interaction and
+rotational restraint, so the program offers a calibration against the ten
+full-size Badawi (1983) specimens:
+
+* the objective is the relative RMS error
+  `sqrt(mean[((Pu - Ptest)/Ptest)^2])`;
+* a bounded Nelder–Mead search in `(ln mu, ln lambda)` adjusts both values
+  (`delta_max` and `Rult` are kept at their measured/input values);
+* the dialog prints the initial and fitted values, the error before/after and
+  the per-specimen capacities, and can apply the fitted parameters to the
+  current connection;
+* the fitted values are ordinary model inputs and are therefore exported to
+  the JSON file and used by the analytical solver, the GUI and the FE fallback.
 
 ---
 
@@ -338,12 +359,62 @@ IDEA util.*, and the *Connection capacity (IDEA)* row) and in the log.
 
 ---
 
+### 4.5 Nonlinear FE fallback (`eccbolt/fe_fallback.py`)
+
+When IDEA StatiCa does not return a usable result, the program can run its own
+OpenSees fallback (`Analysis → Run FE fallback`, or
+`python -m eccbolt.benchmarks --fea`).  It no longer assumes rigid, linear
+plates:
+
+* **real bolt holes** – each plate is meshed with a circular opening of
+  diameter `d + hole clearance` (Delaunay triangulation, `Tri31` plane-stress
+  elements).  The net section and the stress concentration at the hole are
+  therefore part of the model;
+* **hole clearance** – the bolt is represented by pin nodes and one-sided
+  bearing trusses on the hole boundary.  The trusses have an initial radial gap
+  `(d_hole − d_bolt)/2`, so the bolt idles through the clearance before it
+  bears on the plate;
+* **nonlinear plates** – the default plate material is `J2Plasticity` with the
+  measured `fy/fu` (elastic plates are still available for comparison).  The
+  immediate bearing zone and the fixed boundary layer are kept elastic so the
+  point-wise bearing stress cannot make the J2 return mapping singular; if a
+  J2 step still fails, the run is repeated elastically and the result is
+  flagged as `elastic (J2 fallback)`;
+* **vector C&K bolts** – the bolt force is applied through a pair of orthogonal
+  nonlinear links oriented with the expected C&K bolt-force direction, so the
+  direction of the bolt force follows the vector law instead of being tied to
+  the global X/Z axes;
+* **capacity** – a load-controlled push-over with the nonlocal plate-yield
+  check reports the first limit state (bolt shear, plate tear-out/net section
+  or gross plate yielding), the per-bolt forces and the governing mode.
+
+The fallback is checked against the **same physical specimens** used for the
+analytical verification:
+
+```bash
+python -m eccbolt.benchmarks --fea
+python -m eccbolt.validation --fea          # includes the FE checks
+```
+
+`--fea` prints the measured, C&K and FE capacity of every specimen and the
+mean measured/FE ratio.  The current run (stored in
+`docs/fea_verification_report.txt`) gives **10/10 capacities** and a mean
+measured/FE ratio of **1.189** (C&K: 1.127).  The FE model is intentionally a
+*fallback*: it is mesh-sensitive at the bearing zone, the J2 plate update is
+less robust than a commercial CBFEM solver, and the local bearing zone is
+regularised.  The per-specimen ratios and the plate model actually used are
+printed so the result is not presented as more accurate than it is.
+
+---
+
 ## 5. Windows executable
 
 A pre-built single-file Windows executable (x64, no Python needed) is
 distributed as five parts plus a self-verifying reassembler (a single large file
 tends to get truncated by transfer channels, which makes Windows report
-"This app can't run on your PC"):
+"This app can't run on your PC").  The repository stores the transfer parts
+rather than the complete 100+ MB executable (GitHub's per-file limit); the
+reassembler creates the complete `EccentricBolt.exe` locally.
 
     windows_exe/split_parts/EccentricBolt.exe.001 ... .005
     windows_exe/split_parts/reassemble_and_verify.bat
@@ -351,28 +422,32 @@ tends to get truncated by transfer channels, which makes Windows report
 
 Download all six files into one folder, double-click
 `reassemble_and_verify.bat`; it produces `EccentricBolt.exe`
-(82,472,410 bytes, SHA-256
-`3d19d72552d04967520804cb25f03ccd70fb3840f8584423fb9747b52b010239`) and refuses
-to continue if any part is incomplete.
+(116,590,369 bytes, SHA-256
+`54f1d0168950317730f9f88f68ecb03f5d3cb8afb104353986f872b83e88142a`) and refuses
+to continue if any part is incomplete.  This build includes the configurable
+C&K parameters, the Calibrate command and the nonlinear OpenSees fallback.
 
 * double-click it to start the GUI (a console window shows the REST log);
 * `EccentricBolt.exe --selftest` runs the headless verification suite
   (presets, C&K checks, IOM export, REST pipeline, published-source comparison)
   and exits 0/1;
+* `EccentricBolt.exe --fea-selftest` runs a headless OpenSees fallback check
+  and exits 0/1;
 * `EccentricBolt.exe --smoke` builds the window headlessly and writes
   `smoke_gui.png` (used to validate the build).
 
-The shipped binary passes both modes (`SELFTEST OK`, `SMOKE OK`).
+The shipped binary passes all modes (`SELFTEST OK`, `FEA SELFTEST OK`,
+`SMOKE OK`).
 
 ### If Windows reports "This app can't run on your PC"
 
 The published executable is a verified, uncorrupted x64 PE (SHA-256
-`3d19d725…2b010239`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
+`54f1d016…83e88142a`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
 therefore almost always means one of:
 
 1. **The copy on your PC is truncated/corrupted** (large single-file download).
    Check with `certutil -hashfile EccentricBolt.exe SHA256` (size must be
-   82,472,410 bytes).  If it differs, use the transfer-robust delivery:
+   116,590,369 bytes).  If it differs, use the transfer-robust delivery:
    download the five parts plus `reassemble_and_verify.bat` from
    `windows_exe/split_parts/` and double-click `reassemble_and_verify.bat` -
    it rebuilds the exe and verifies its SHA-256 before you run it.
@@ -407,7 +482,9 @@ eccbolt/
   model.py               input data classes + C&K constants
   icr.py                 Crawford & Kulak ICR solver (+ elastic method)
   analysis.py            facade: C, Pu, utilization, bolt forces
-  benchmarks.py          comparison with five published sources (CLI)
+  calibration.py         Calibrate mu/lambda against physical tests (CLI/GUI)
+  fe_fallback.py         OpenSees FE fallback (holes, clearance, J2 plates)
+  benchmarks.py          comparison with physical tests + FE fallback (CLI)
   iom.py                 IOM OpenModel XML generator + load components
   idea_service.py        Connection REST API workflow (official SDK)
   mock_service.py        offline mock of the REST service
@@ -437,3 +514,6 @@ docs/                    screenshots + verification report
 | 10 | the plates were in contact with a zero-thickness interface | `Plate clash warning` from the service | a 0.2 mm clearance and a bolt grip that spans both plates |
 | 11 | `rawresults-text` returns a JSON **array of strings** when the solver did not run | `json.loads(text)[0]` raised "Expecting value: line 1 column 1 (char 0)" and hid the service's real message | defensive parsing plus the service's own failure text in the log and check list |
 | 12 | no way to adjust the IDEA calculation | the request to tune "mesh size, material properties" could not be met | `IdeaSettings` + `settings_api.update_settings` (mesh size, elements per plate, material model, detailing checks) exposed in the GUI and used by `eccbolt.benchmarks --tune` |
+| 13 | C&K `mu = 10/in`, `lambda = 0.55` were hard-coded although they came from single-bolt tests | users could not adapt the bolt-group response to their own tests | `BoltMaterial.mu` (1/m) and `BoltMaterial.ck_lambda` are model inputs, exposed in the GUI (mu shown in 1/in), saved in JSON and passed through the ICR solver |
+| 14 | no automatic calibration against physical results | the request to revise the C&K values from experiments was not implemented | `eccbolt/calibration.py` + **Analysis → Calibrate C&K parameters** fit `mu`/`lambda` to the ten Badawi specimens by bounded Nelder–Mead on the relative RMS error, and can apply the result |
+| 15 | FE fallback used linear plates, no holes and no clearance | tear-out, net section and plate yielding could not be represented | FE fallback now meshes real holes (`d + clearance`), uses one-sided bearing gaps, J2-plastic plates (with stable elastic bearing/boundary zones and an automatic elastic fallback) and a vector C&K bolt law; `benchmarks --fea` / `validation --fea` compare it with the physical specimens |

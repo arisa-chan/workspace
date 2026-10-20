@@ -46,11 +46,15 @@ LAMBDA = 0.55
 DELTA_MAX = 0.34 * 0.0254   # m     (0.34 in)
 
 
-def bolt_force_ratio(delta: float) -> float:
-    """R/Rult for a bolt deformation delta [m] (C&K load-deformation curve)."""
+def bolt_force_ratio(delta: float, mu: float = MU,
+                     lam: float = LAMBDA) -> float:
+    """R/Rult for a bolt deformation delta [m] (C&K load-deformation curve).
+
+    ``mu`` [1/m] and ``lam`` [-] are user/calibration parameters.
+    """
     if delta <= 0.0:
         return 0.0
-    return (1.0 - math.exp(-MU * delta)) ** LAMBDA
+    return (1.0 - math.exp(-mu * delta)) ** lam
 
 
 @dataclass
@@ -81,13 +85,13 @@ def _elastic_ic(bolts: np.ndarray, pdir: np.ndarray, ppoint: np.ndarray):
 
 
 def _state(bolts: np.ndarray, ic: np.ndarray, pdir: np.ndarray, ppoint: np.ndarray,
-           delta_max: float):
+           delta_max: float, mu: float = MU, lam: float = LAMBDA):
     """For a trial ICR: bolt geometry, force ratios, unit-load moment, Pu/Rult."""
     d = bolts - ic
     r = np.linalg.norm(d, axis=1)
     rmax = r.max()
     delta = delta_max * r / rmax
-    f = np.array([bolt_force_ratio(x) for x in delta])          # R_i/Rult
+    f = np.array([bolt_force_ratio(x, mu, lam) for x in delta])  # R_i/Rult
     mp = float(cross2(ppoint - ic, pdir))                       # unit-load moment (CCW+)
     if abs(mp) < 1e-14:
         return d, r, delta, f, mp, 0.0, np.zeros(2)
@@ -103,6 +107,8 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
               load_direction: Tuple[float, float],
               load_point: Tuple[float, float],
               delta_max: float = DELTA_MAX,
+              mu: float = MU, lam: float = LAMBDA,
+              ck_lambda: Optional[float] = None,
               tol: float = 1e-9, max_iter: int = 300) -> ICRResult:
     """Solve the C&K ultimate-strength problem for a bolt group.
 
@@ -115,6 +121,8 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
 
     Returns an :class:`ICRResult` with the coefficient C = Pu/Rult.
     """
+    if ck_lambda is not None:
+        lam = float(ck_lambda)
     bolts = np.asarray(bolt_xy, dtype=float).reshape(-1, 2)
     pdir = np.asarray(load_direction, dtype=float)
     pdir = pdir / np.linalg.norm(pdir)
@@ -151,7 +159,8 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
     it = 0
     step = 1.0
     for it in range(1, max_iter + 1):
-        d, r, delta, f, mp, beta, resid = _state(bolts, ic, pdir, ppoint, delta_max)
+        d, r, delta, f, mp, beta, resid = _state(bolts, ic, pdir, ppoint,
+                                                 delta_max, mu, lam)
         fnorm = float(np.linalg.norm(resid))
         log.append(f"iter {it:3d}  ic=({ic[0]:+.5f},{ic[1]:+.5f})  C={beta:.5f}  |F|={fnorm:.3e}")
         if fnorm < tol:
@@ -162,8 +171,10 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
         for k in range(2):
             e = np.zeros(2)
             e[k] = h
-            _, _, _, _, _, _, rp = _state(bolts, ic + e, pdir, ppoint, delta_max)
-            _, _, _, _, _, _, rm = _state(bolts, ic - e, pdir, ppoint, delta_max)
+            _, _, _, _, _, _, rp = _state(bolts, ic + e, pdir, ppoint,
+                                          delta_max, mu, lam)
+            _, _, _, _, _, _, rm = _state(bolts, ic - e, pdir, ppoint,
+                                          delta_max, mu, lam)
             jac[:, k] = (rp - rm) / (2 * h)
         try:
             dx = np.linalg.solve(jac, -resid)
@@ -173,7 +184,8 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
         acc = 1.0
         for _ in range(40):
             trial = ic + acc * dx
-            _, _, _, _, _, b2, r2 = _state(bolts, trial, pdir, ppoint, delta_max)
+            _, _, _, _, _, b2, r2 = _state(bolts, trial, pdir, ppoint,
+                                           delta_max, mu, lam)
             if b2 > 0 and np.linalg.norm(r2) < fnorm:
                 break
             acc *= 0.5
@@ -182,7 +194,8 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
     else:  # pragma: no cover - non convergence
         log.append("WARNING: Newton iteration did not converge")
 
-    d, r, delta, f, mp, beta, resid = _state(bolts, ic, pdir, ppoint, delta_max)
+    d, r, delta, f, mp, beta, resid = _state(bolts, ic, pdir, ppoint,
+                                             delta_max, mu, lam)
     sense = -np.sign(mp)
     t = sense * np.stack([-d[:, 1], d[:, 0]], axis=1) / r[:, None]
     # R_i / Rult at the ultimate load of the group.  The applied load at that
@@ -201,7 +214,10 @@ def solve_icr(bolt_xy: Sequence[Tuple[float, float]],
 def solve_from_eccentricity(bolt_xy: Sequence[Tuple[float, float]],
                             load_direction: Tuple[float, float],
                             eccentricity: float,
-                            delta_max: float = DELTA_MAX) -> ICRResult:
+                            delta_max: float = DELTA_MAX,
+                            mu: float = MU,
+                            lam: float = LAMBDA,
+                            ck_lambda: Optional[float] = None) -> ICRResult:
     """Convenience wrapper: load acting at (signed) perpendicular distance
     `eccentricity` from the bolt-group centroid.  For a vertical load this is
     the classical horizontal eccentricity e of Crawford & Kulak (positive e =
@@ -212,7 +228,8 @@ def solve_from_eccentricity(bolt_xy: Sequence[Tuple[float, float]],
     cg = bolts.mean(axis=0)
     n = np.array([-pdir[1], pdir[0]])        # rot90 CCW of the load direction
     ppoint = cg + eccentricity * n
-    return solve_icr(bolt_xy, tuple(pdir), tuple(ppoint), delta_max)
+    return solve_icr(bolt_xy, tuple(pdir), tuple(ppoint), delta_max,
+                     mu=mu, lam=lam, ck_lambda=ck_lambda)
 
 
 def elastic_bolt_forces(bolt_xy: Sequence[Tuple[float, float]],
