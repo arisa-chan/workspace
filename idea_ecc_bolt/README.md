@@ -210,18 +210,40 @@ nothing listens on the configured port:
 
 The original `mu = 10/in`, `lambda = 0.55` were fitted to **single-bolt**
 shear tests.  A bolt group has additional plate bearing, bolt interaction and
-rotational restraint, so the program offers a calibration against the ten
-full-size Badawi (1983) specimens:
+rotational restraint, so the program offers two calibrations:
 
-* the objective is the relative RMS error
-  `sqrt(mean[((Pu - Ptest)/Ptest)^2])`;
-* a bounded Nelder–Mead search in `(ln mu, ln lambda)` adjusts both values
-  (`delta_max` and `Rult` are kept at their measured/input values);
-* the dialog prints the initial and fitted values, the error before/after and
-  the per-specimen capacities, and can apply the fitted parameters to the
-  current connection;
-* the fitted values are ordinary model inputs and are therefore exported to
-  the JSON file and used by the analytical solver, the GUI and the FE fallback.
+1. **C&K calibration** - bounded Nelder–Mead in `(ln mu, ln lambda)` against
+   the selected specimens, minimising the relative RMS error
+   `sqrt(mean[((Pu - Ptest)/Ptest)^2])`.  `delta_max` and `Rult` stay at their
+   measured/input values.
+2. **FE calibration** - runs the OpenSees fallback for the selected
+   specimens and fits the capacity bias factor
+   `s = Σ(f_i/t_i) / Σ((f_i/t_i)^2)`, stored in
+   `ConnectionInput.fem.capacity_factor` and applied to every later FE
+   capacity.  The calibration run uses elastic plates for speed and
+   robustness; the normal FE dialog can still use J2 plates.
+
+The Calibrate dialog shows a **tree of all experimental sets and samples** with
+check boxes, so a user can, for example, use all Crawford & Kulak samples plus
+only selected samples from another set.  Sets whose tests are not meaningful
+for the rigid-plate C&K method are marked `[FE]`; C&K-only sets are marked
+`[C&K]`.  The fitted values are ordinary model inputs and are exported to JSON.
+
+Available sets can be listed with:
+
+```bash
+python -m eccbolt.calibration --list-sets
+```
+
+Examples:
+
+```bash
+# all samples of C&K + samples B1/B2 only
+python -m eccbolt.calibration --sets crawford_kulak_1968 --sample crawford_kulak_1968:B1 --sample crawford_kulak_1968:B2
+
+# all sets, analytical and FE calibration
+python -m eccbolt.calibration --sets all --fea
+```
 
 ---
 
@@ -262,7 +284,9 @@ accuracy of either.
 | source | specimens | data used | result |
 |---|---|---|---|
 | **Badawi (1983)** — "Behaviour of Eccentric Bolted Shear Connections", M.Eng. thesis, McGill University | 10 full-size double-angle tests (S13, S14, S17-S24) | bolt pattern and eccentricity (Table 4), ultimate bolt value from single-bolt tension-shear tests (Table 41), measured web tensile strength (Table 5), observed failure load (Table 48) | mean observed/ultimate load **1.127** for the ten specimens (Badawi's own CISC/C&K mean over the same tests is **1.114**, over all twelve **1.074**) |
-| **Crawford & Kulak (1971)** — J. Struct. Div. ASCE 97(ST3) | 8 full-size tests | the paper's own accuracy statement | predictions **5-14 % above** the observed failure loads — the same band the program reproduces |
+| **Crawford & Kulak (1968/1971)** — Nova Scotia Technical College report / J. Struct. Div. ASCE 97(ST3) | 8 full-size double-angle tests B1-B8 | Table 1 bolt patterns/eccentricities, Table 2 observed Pult (the model uses Pult/2 for one of the two identical connections) | full per-sample set, used for C&K calibration; the paper's own predictions are 5-14 % above test |
+| **Denavit, Franceschetti & Shahan (2021)** — AISC tearout report | 22 single-bolt tension/tearout tests (standard, no-clearance, oversize, extra-oversize and slotted holes) | Table 11: edge distance, hole size, measured Fu, ultimate load | FE-only set for calibrating bearing/tearout capacity; target is Rexp,u/2 for one shear plane |
+| **Astaneh et al. (1989) / Sarkar (1992)** — as tabulated by Ashakul (2004) | 6 + 5 single-plate shear connections | Tables 2.2-2.5: bolt pattern, plate size, failure shear (Astaneh moments converted to eccentricity) | FE-only sets for single-plate shear connections |
 | **Abu-Yosef, Sayed-Ahmed & Soliman (2019)** — ISEC-10, STR-40 | 12 eccentric shear+torsion tests | experimental/inelastic-analysis ratio | **0.90 ± 0.04**, i.e. the same over-prediction |
 | **Bahia & Martin (1980)** — Proc. Instn Civ. Engrs 69 | 117 single-shear joints | published conclusion | linear load-deformation theory "suitable for the analysis and slightly conservative" — test tables not openly available, so no per-specimen comparison |
 
@@ -386,7 +410,12 @@ plates:
   the global X/Z axes;
 * **capacity** – a load-controlled push-over with the nonlocal plate-yield
   check reports the first limit state (bolt shear, plate tear-out/net section
-  or gross plate yielding), the per-bolt forces and the governing mode.
+  or gross plate yielding), the per-bolt forces and the governing mode;
+* **calibration** – the FE capacity bias factor can be fitted to any selected
+  experimental sets/samples (including the Denavit tearout tests and the
+  single-plate tests from Ashakul's tables) with
+  `Analysis → Calibrate C&K parameters` or
+  `python -m eccbolt.calibration --sets all --fea`.
 
 The fallback is checked against the **same physical specimens** used for the
 analytical verification:

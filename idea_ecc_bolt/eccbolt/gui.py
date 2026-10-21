@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
     QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
-    QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
+    QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .analysis import analyze
 from .model import (KIP, KSI, MM, INCH, BoltMaterial, ConnectionInput,
@@ -175,13 +176,21 @@ class CalibrationWorker(QThread):
     finished_ok = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, selection=None, include_ck=True, include_fea=False,
+                 fea_mesh=0.012, parent=None):
         super().__init__(parent)
+        self.selection = selection
+        self.include_ck = include_ck
+        self.include_fea = include_fea
+        self.fea_mesh = fea_mesh
 
     def run(self):
         try:
-            from .calibration import calibrate_ck_parameters
-            self.finished_ok.emit(calibrate_ck_parameters())
+            from .calibration import calibrate_selected
+            self.finished_ok.emit(calibrate_selected(
+                selection=self.selection, include_ck=self.include_ck,
+                include_fea=self.include_fea, fea_mesh=self.fea_mesh,
+                verbose=False))
         except Exception as exc:
             import traceback
             self.failed.emit(traceback.format_exc())
@@ -947,11 +956,17 @@ class MainWindow(QMainWindow):
         chk_nl.setChecked(self.settings.value("fe_nonlinear", "1") == "1")
         chk_gap = QCheckBox("model hole clearance (bearing gap)")
         chk_gap.setChecked(self.settings.value("fe_gap", "1") == "1")
+        factor = QDoubleSpinBox()
+        factor.setRange(0.05, 20.0)
+        factor.setDecimals(4)
+        factor.setValue(float(self.ci.fem.capacity_factor))
+        factor.setToolTip("Calibrated capacity bias factor (1 = uncalibrated)")
         info = QLabel("Models the actual bolt holes, one-sided bearing with "
                       "clearance and the vector C&K bolt law.")
         info.setWordWrap(True)
         fl.addRow(info)
         fl.addRow("Mesh size", mesh)
+        fl.addRow("Capacity factor", factor)
         fl.addRow(chk_nl)
         fl.addRow(chk_gap)
         hb = QHBoxLayout()
@@ -964,6 +979,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("fe_mesh_mm", str(mesh.value()))
         self.settings.setValue("fe_nonlinear", "1" if chk_nl.isChecked() else "0")
         self.settings.setValue("fe_gap", "1" if chk_gap.isChecked() else "0")
+        self.ci.fem.capacity_factor = factor.value()
         from .fe_fallback import model_from_connection
         model = model_from_connection(
             self.ci, mesh=mesh.value() / 1000.0 if mesh.value() else None,
@@ -1001,7 +1017,8 @@ class MainWindow(QMainWindow):
                  f"max bolt deformation: "
                  f"{res.get('max_bolt_deformation', 0)*1000:.3f} mm",
                  f"hole clearance: "
-                 f"{res.get('hole_clearance', 0)*1000:.2f} mm"]
+                 f"{res.get('hole_clearance', 0)*1000:.2f} mm",
+                 f"capacity factor: {res.get('capacity_factor', 1.0):.4f}"]
         if res.get("notes"):
             lines.append(str(res["notes"]))
         self.chk_view.setPlainText("\n".join(lines))
@@ -1017,19 +1034,73 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------- calibration
     def calibrate_ck(self):
+        from .benchmarks import experimental_sets
         dlg = QDialog(self)
-        dlg.setWindowTitle("Calibrate Crawford & Kulak parameters")
+        dlg.setWindowTitle("Calibrate C&K parameters and FE fallback")
         vl = QVBoxLayout(dlg)
         info = QLabel(
-            "Fits mu and lambda to the observed failure loads of the physical "
-            "specimens (Badawi 1983, ten full-size tests).  The original "
-            "values 10/in and 0.55 came from single-bolt tests, not from a "
-            "bolt group.")
+            "Select the experimental sets/samples to use.  C&K calibration "
+            "fits mu and lambda with the ICR solver; FE calibration fits the "
+            "capacity bias factor of the OpenSees fallback.  [C&K] marks "
+            "specimens used only for C&K calibration, [FE] only for FE "
+            "calibration.")
         info.setWordWrap(True)
         vl.addWidget(info)
+
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["experimental set / sample", "note"])
+        tree.setColumnWidth(0, 330)
+        default_on = {"badawi_1983", "crawford_kulak_1968"}
+        sets = experimental_sets()
+        parent_items = {}
+        for key, cases in sets.items():
+            if not cases:
+                continue
+            title = cases[0].set_name or key
+            parent = QTreeWidgetItem([f"{title} ({len(cases)})", ""])
+            parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable)
+            parent.setCheckState(0, Qt.Checked if key in default_on
+                                 else Qt.Unchecked)
+            parent.setData(0, Qt.UserRole, key)
+            tree.addTopLevelItem(parent)
+            parent_items[key] = parent
+            for c in cases:
+                if c.supports_analytical and not c.supports_fea:
+                    mark = "[C&K] "
+                elif c.supports_fea and not c.supports_analytical:
+                    mark = "[FE] "
+                else:
+                    mark = ""
+                child = QTreeWidgetItem([mark + c.name, c.note])
+                child.setFlags(child.flags() | Qt.ItemIsUserCheckable)
+                child.setCheckState(0, parent.checkState(0))
+                child.setData(0, Qt.UserRole, c.name)
+                parent.addChild(child)
+        tree.expandAll()
+        vl.addWidget(tree, 3)
+
+        hb0 = QHBoxLayout()
+        allb = QPushButton("All")
+        noneb = QPushButton("None")
+        chk_ck = QCheckBox("calibrate C&K (fast)")
+        chk_ck.setChecked(True)
+        chk_fea = QCheckBox("calibrate FE fallback (slow)")
+        chk_fea.setChecked(True)
+        mesh = QDoubleSpinBox()
+        mesh.setRange(1.0, 100.0)
+        mesh.setDecimals(1)
+        mesh.setSuffix(" mm")
+        mesh.setValue(float(self.settings.value("cal_fea_mesh_mm", 12.0)))
+        hb0.addWidget(allb); hb0.addWidget(noneb)
+        hb0.addSpacing(12)
+        hb0.addWidget(chk_ck); hb0.addWidget(chk_fea)
+        hb0.addWidget(QLabel("FE mesh"))
+        hb0.addWidget(mesh)
+        vl.addLayout(hb0)
+
         out = QPlainTextEdit(readOnly=True)
-        out.setMinimumHeight(280)
-        vl.addWidget(out)
+        out.setMinimumHeight(260)
+        vl.addWidget(out, 2)
         hb = QHBoxLayout()
         run = QPushButton("Run calibration")
         apply = QPushButton("Apply && close")
@@ -1038,37 +1109,113 @@ class MainWindow(QMainWindow):
         hb.addWidget(run); hb.addWidget(apply); hb.addWidget(close)
         vl.addLayout(hb)
         state = {"res": None}
+        guard = {"on": False}
+
+        def _sync_parent(item):
+            if guard["on"] or item.parent() is not None:
+                return
+            guard["on"] = True
+            for i in range(item.childCount()):
+                item.child(i).setCheckState(0, item.checkState(0))
+            guard["on"] = False
+
+        def _sync_child(item):
+            if guard["on"] or item.parent() is None:
+                return
+            p = item.parent()
+            n = p.childCount()
+            checked = sum(1 for i in range(n)
+                          if p.child(i).checkState(0) == Qt.Checked)
+            guard["on"] = True
+            if checked == 0:
+                p.setCheckState(0, Qt.Unchecked)
+            elif checked == n:
+                p.setCheckState(0, Qt.Checked)
+            else:
+                p.setCheckState(0, Qt.PartiallyChecked)
+            guard["on"] = False
+
+        tree.itemChanged.connect(
+            lambda it, col: (_sync_parent(it) if it.parent() is None
+                             else _sync_child(it)))
+
+        def _set_all(state_):
+            guard["on"] = True
+            for p in parent_items.values():
+                p.setCheckState(0, state_)
+                for i in range(p.childCount()):
+                    p.child(i).setCheckState(0, state_)
+            guard["on"] = False
+
+        def _selection():
+            sel = {}
+            for key, p in parent_items.items():
+                if p.checkState(0) == Qt.Checked:
+                    sel[key] = None
+                    continue
+                names = [p.child(i).data(0, Qt.UserRole)
+                         for i in range(p.childCount())
+                         if p.child(i).checkState(0) == Qt.Checked]
+                if names:
+                    sel[key] = names
+            return sel
 
         def _run():
+            sel = _selection()
+            if not sel:
+                QMessageBox.warning(dlg, "Calibration",
+                                    "Select at least one experimental sample.")
+                return
+            if not chk_ck.isChecked() and not chk_fea.isChecked():
+                QMessageBox.warning(dlg, "Calibration",
+                                    "Tick C&K and/or FE calibration.")
+                return
             run.setEnabled(False)
-            out.setPlainText("Calibrating ...")
-            self._cal_worker = CalibrationWorker()
+            apply.setEnabled(False)
+            out.setPlainText("Calibrating ...\n"
+                             + "\n".join(f"{k}: {v or 'all'}"
+                                         for k, v in sel.items()))
+            self.settings.setValue("cal_fea_mesh_mm", str(mesh.value()))
+            self._cal_worker = CalibrationWorker(
+                selection=sel, include_ck=chk_ck.isChecked(),
+                include_fea=chk_fea.isChecked(),
+                fea_mesh=mesh.value() / 1000.0)
             self._cal_worker.finished_ok.connect(lambda r: _done(r))
             self._cal_worker.failed.connect(
-                lambda t: out.setPlainText("Calibration failed:\n" + t))
+                lambda t: (out.setPlainText("Calibration failed:\n" + t),
+                           run.setEnabled(True)))
             self._cal_worker.start()
 
         def _done(res):
             state["res"] = res
-            out.setPlainText(res.format())
+            text = []
+            if "ck" in res:
+                text.append(res["ck"].format())
+            if "fea" in res:
+                text.append(res["fea"].format())
+            out.setPlainText("\n\n".join(text))
             apply.setEnabled(True)
             run.setEnabled(True)
 
         def _apply():
-            if state["res"] is not None:
-                state["res"].apply(self.ci)
+            res = state["res"]
+            if res:
+                for r in res.values():
+                    r.apply(self.ci)
                 self._loading = True
                 self.sp_mu.setValue(self.units.mu(self.ci.bolt_mat.mu))
                 self.sp_lambda.setValue(self.ci.bolt_mat.ck_lambda)
                 self._loading = False
-                self._log(state["res"].format())
+                self._log("\n\n".join(r.format() for r in res.values()))
                 self.update_views()
                 dlg.accept()
 
+        allb.clicked.connect(lambda: _set_all(Qt.Checked))
+        noneb.clicked.connect(lambda: _set_all(Qt.Unchecked))
         run.clicked.connect(_run)
         apply.clicked.connect(_apply)
         close.clicked.connect(dlg.reject)
-        dlg.resize(760, 620)
+        dlg.resize(980, 780)
         dlg.exec()
 
     def run_validation(self):

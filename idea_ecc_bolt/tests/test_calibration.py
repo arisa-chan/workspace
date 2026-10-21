@@ -7,7 +7,10 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from eccbolt.analysis import analyze
-from eccbolt.calibration import calibrate_ck_parameters
+from eccbolt.benchmarks import (ExperimentalCase, experimental_sets,
+                                select_experimental_cases)
+from eccbolt.calibration import (calibrate_ck_parameters,
+                                 calibrate_fea_parameters, calibrate_selected)
 from eccbolt.icr import bolt_force_ratio, solve_from_eccentricity
 from eccbolt.model import BoltMaterial, INCH
 from eccbolt.presets import crawford_kulak_example
@@ -65,3 +68,49 @@ def test_default_parameters_are_still_the_original_ck_values():
     assert bm.mu * INCH == pytest.approx(10.0)
     assert bm.ck_lambda == pytest.approx(0.55)
     assert bm.lambda_ == bm.ck_lambda
+
+
+def test_experimental_sets_and_sample_selection():
+    sets = experimental_sets()
+    assert "badawi_1983" in sets
+    assert "crawford_kulak_1968" in sets
+    assert "denavit_2021" in sets
+    assert len(sets["crawford_kulak_1968"]) == 8
+    assert len(sets["denavit_2021"]) == 22
+    cases = select_experimental_cases({
+        "crawford_kulak_1968": ["B1", "B2"],
+        "badawi_1983": ["S13"],
+    })
+    assert {c.name for c in cases} == {"B1", "B2", "S13"}
+    assert {c.set_key for c in cases} == {"crawford_kulak_1968",
+                                          "badawi_1983"}
+    # selecting a whole set works as well
+    assert len(select_experimental_cases({"sarkar_1992": None})) == 5
+
+
+def test_selection_is_honoured_by_calibration():
+    res = calibrate_ck_parameters(selection={
+        "crawford_kulak_1968": ["B1", "B2"]}, max_iter=20)
+    assert res.n_cases == 2
+    assert {c[0] for c in res.cases} == {"B1", "B2"}
+    out = calibrate_selected({"crawford_kulak_1968": ["B1"]},
+                             include_ck=True, include_fea=False,
+                             max_iter=10)
+    assert "ck" in out and out["ck"].n_cases == 1
+
+
+def test_fea_calibration_factor(monkeypatch):
+    cases = select_experimental_cases({"denavit_2021": ["STD1", "STD2"]})
+
+    def fake_fea(self, **kwargs):
+        return {"ok": True, "capacity": self.failure_load * 1.25,
+                "raw_capacity": self.failure_load * 1.25}
+
+    monkeypatch.setattr(ExperimentalCase, "fea_analysis", fake_fea)
+    res = calibrate_fea_parameters(cases=cases)
+    assert res.n_used == 2
+    assert res.factor == pytest.approx(0.8)
+    assert res.rmse < res.initial_rmse
+    ci = crawford_kulak_example()
+    res.apply(ci)
+    assert ci.fem.capacity_factor == pytest.approx(0.8)

@@ -23,9 +23,25 @@ The ten specimens whose bolt pattern is unambiguous are modelled here.  S15
 and S16 are omitted because their pattern is only partly reproduced in the
 published table.
 
-**Crawford & Kulak (1971)** - eight full-size tests; the paper reports that the
-analytical predictions ran 5-14 % above the observed failure loads, which is
-used below as the reference band for the method's systematic bias.
+**Crawford & Kulak (1968/1971)** - the Nova Scotia Technical College report is
+the full test programme behind the 1971 paper: eight full-size double-angle
+specimens B1-B8 with the bolt patterns, eccentricities and observed ultimate
+loads in Tables 1 and 2.  The model uses Pult/2 (one of the two identical
+connections) and the measured 74 kip double-shear bolt strength.
+
+**Denavit, Franceschetti & Shahan (2021)** - the AISC tearout report.  Table 11
+contains 22 single-bolt tension tests with standard, no-clearance, oversize,
+extra-oversize and slotted holes, measured edge distances and ultimate loads.
+They are an FE-only set (the C&K rigid-plate method does not model tearout);
+the lap-joint model uses Rexp,u/2 for one shear plane.
+
+**Astaneh et al. (1989) and Sarkar (1992)** - single-plate shear connection
+tests, as tabulated in Ashakul's (2004) thesis (Tables 2.2-2.5).  They are
+included as FE-only sets with the reported connection shear and, for Astaneh,
+the bolt-line moment converted to an equivalent eccentricity.  Yorgun et al.
+(2004), also supplied as a PDF, is a double-channel beam-to-column moment
+connection and is not a bolt-group shear specimen; it is therefore not part of
+the calibration database.
 
 **Abu-Yosef, Sayed-Ahmed & Soliman (2019)** - twelve eccentric shear+torsion
 tests (ISEC-10, STR-40); the paper reports an experimental/inelastic-analysis
@@ -82,6 +98,20 @@ class ExperimentalCase:
     plate_height: float                        # m
     failure_load: float                        # N, observed
     note: str = ""
+    #: key/name of the experimental set this specimen belongs to
+    set_key: str = ""
+    set_name: str = ""
+    #: measured plate yield strength; None -> 0.85*Fu (Badawi approximation)
+    plate_fy: Optional[float] = None
+    #: bolt-hole clearance (hole diameter - bolt diameter)
+    hole_clearance: float = 0.002
+    #: whether the specimen is meaningful for the C&K group method / FE model
+    supports_analytical: bool = True
+    supports_fea: bool = True
+
+    @property
+    def case_id(self) -> str:
+        return f"{self.set_key or self.source}:{self.name}"
 
     def connection_input(self, load_factor: float = 1.0) -> ConnectionInput:
         """A :class:`ConnectionInput` that reproduces the specimen."""
@@ -89,13 +119,15 @@ class ExperimentalCase:
                      max(b[1] for b in self.bolts_xy) * 2 + 0.1)
         width = max(self.plate_width,
                     max(b[0] for b in self.bolts_xy) * 2 + 0.1)
+        fy = 0.85 * self.plate_fu if self.plate_fy is None else self.plate_fy
         mat = SteelMaterial(f"measured Fu={self.plate_fu/1e6:.0f} MPa",
-                            fy=0.85 * self.plate_fu, fu=self.plate_fu)
+                            fy=fy, fu=self.plate_fu)
         return ConnectionInput(
             title=f"{self.source} {self.name}",
             design_code="AISC",
             bolts_xy=list(self.bolts_xy),
             bolt_diameter=self.bolt_diameter,
+            bolt_hole_clearance=self.hole_clearance,
             plate_a=Plate("Support plate", width=width, height=height,
                           thickness=self.plate_thickness, material=mat),
             plate_b=Plate("Loaded plate", width=width * 1.5, height=height,
@@ -149,6 +181,7 @@ class ExperimentalCase:
             "plate_nonlinear": plate_nonlinear,
             "plate_criterion": "nonlocal",
             "perpendicular_force_factor": 0.5,
+            "capacity_factor": ci.fem.capacity_factor,
         }
         model.update(options)
         return model
@@ -224,12 +257,217 @@ def badawi_cases() -> List[ExperimentalCase]:
             bolt_diameter=0.75 * INCH, bolt_rult=rult * 1e3,
             plate_thickness=t * MM, plate_fu=fu * 1e6,
             plate_width=span_x, plate_height=span_y,
-            failure_load=p * 1e3, note=note))
+            failure_load=p * 1e3, note=note,
+            set_key="badawi_1983", set_name="Badawi (1983)"))
     return cases
 
 
+CRAWFORD_KULAK = "Crawford & Kulak (1968)"
+DENAVIT = "Denavit et al. (2021)"
+ASTANEH = "Astaneh et al. (1989)"
+SARKAR = "Sarkar (1992)"
+
+#: C&K full-size tests B1-B8 (Tables 1 and 2 of the 1968 report).
+#: The table's Pult is for the complete specimen (two identical connections);
+#: the model represents one connection, hence failure_load = Pult/2.
+#: Rult = 74 kip is the measured 3/4 in A325 double-shear bolt strength.
+#: name, bolts, e [in], test Pult [kip], note
+_CK_DATA = (
+    ("B1", row(5, 2.5), 8, 225, "one column, 5 bolts"),
+    ("B2", row(5, 3.0), 10, 230, "one column, 5 bolts"),
+    ("B3", row(5, 3.0), 12, 190, "one column, 5 bolts"),
+    ("B4", row(6, 3.0), 13, 251, "one column, 6 bolts"),
+    ("B5", row(6, 3.0), 15, 221, "one column, 6 bolts"),
+    ("B6", grid(2, 4, 2.5, 3.0), 12, 264, "two columns, 8 bolts"),
+    ("B7", grid(2, 4, 2.5, 3.0), 15, 212, "two columns, 8 bolts"),
+    ("B8", grid(2, 5, 2.5, 2.5), 15, 266, "two columns, 10 bolts"),
+)
+
+
+def crawford_kulak_cases() -> List[ExperimentalCase]:
+    cases = []
+    for name, bolts, ecc_in, p_kip, note in _CK_DATA:
+        span = max(abs(b[1]) for b in bolts) * 2
+        height = span + 3 * INCH
+        cases.append(ExperimentalCase(
+            source=CRAWFORD_KULAK, name=name,
+            set_key="crawford_kulak_1968", set_name="Crawford & Kulak (1968)",
+            bolts_xy=[(x * INCH, y * INCH) for x, y in bolts],
+            eccentricity=ecc_in * INCH,
+            bolt_diameter=0.75 * INCH, bolt_rult=74.0 * 4448.2216152605,
+            plate_thickness=0.5 * INCH, plate_fu=58.0 * 6894757.2932,
+            plate_fy=36.0 * 6894757.2932,
+            plate_width=4.5 * INCH, plate_height=height,
+            hole_clearance=0.0,
+            failure_load=0.5 * p_kip * 4448.2216152605,
+            note=note + " (test Pult/2, one connection)",
+            supports_analytical=True, supports_fea=False))
+    return cases
+
+
+#: Denavit et al. (2021), Table 11 - single-bolt tension tests.  The test is a
+#: butt splice with two shear planes; the lap-joint model represents one plane,
+#: so the target is Rexp,u/2 and Rult is the single-shear A325 value.
+#: name, Le [in], dh [in], Rexp,u [kip], note
+_DENAVIT_DATA = (
+    ("STD1", 1.02, 0.812, 19.9, "standard hole"),
+    ("STD1g", 0.99, 0.823, 17.8, "standard hole, untightened/greased"),
+    ("STD2", 1.16, 0.817, 22.9, "standard hole"),
+    ("STD3", 1.56, 0.815, 31.4, "standard hole"),
+    ("STD4", 2.01, 0.818, 43.8, "standard hole, bearing/tearout"),
+    ("NC1", 1.03, 0.753, 20.7, "no-clearance hole"),
+    ("NC2a", 1.32, 0.752, 29.0, "no-clearance hole"),
+    ("NC2b", 1.27, 0.744, 27.4, "no-clearance hole, repeat"),
+    ("NC3", 1.56, 0.752, 34.0, "no-clearance hole"),
+    ("NC4", 2.03, 0.747, 42.4, "no-clearance hole"),
+    ("OVS1", 1.05, 0.938, 20.3, "oversize hole"),
+    ("OVS2", 1.28, 0.928, 24.4, "oversize hole"),
+    ("OVS3", 1.54, 0.929, 31.0, "oversize hole"),
+    ("OVS4", 2.05, 0.923, 42.0, "oversize hole"),
+    ("XOVS1", 0.96, 1.062, 14.1, "extra-oversize hole"),
+    ("XOVS2", 1.29, 1.056, 24.2, "extra-oversize hole"),
+    ("XOVS3", 1.51, 1.054, 27.1, "extra-oversize hole"),
+    ("XOVS4", 2.04, 1.058, 36.8, "extra-oversize hole"),
+    ("SSLT1", 1.02, 0.994, 18.1, "short-slotted hole (width)"),
+    ("SSLT2", 1.31, 0.997, 21.8, "short-slotted hole (width)"),
+    ("SSLT3", 1.56, 0.990, 29.2, "short-slotted hole (width)"),
+    ("SSLT4", 2.10, 0.992, 40.7, "short-slotted hole (width)"),
+)
+
+
+def denavit_cases() -> List[ExperimentalCase]:
+    cases = []
+    for name, le_in, dh_in, p_kip, note in _DENAVIT_DATA:
+        h = (le_in + 3.0) * INCH
+        y = h / 2 - le_in * INCH           # one free edge at distance Le
+        cases.append(ExperimentalCase(
+            source=DENAVIT, name=name,
+            set_key="denavit_2021", set_name="Denavit et al. (2021)",
+            bolts_xy=[(0.0, y)],
+            eccentricity=0.0,
+            bolt_diameter=0.75 * INCH, bolt_rult=37.0 * 4448.2216152605,
+            plate_thickness=0.25 * INCH,
+            plate_fu=73.7 * 6894757.2932,
+            plate_fy=54.5 * 6894757.2932,
+            plate_width=3.0 * INCH, plate_height=h,
+            hole_clearance=max(0.0, dh_in - 0.75) * INCH,
+            failure_load=0.5 * p_kip * 4448.2216152605,
+            note=note + " (Rexp,u/2, one shear plane)",
+            supports_analytical=False, supports_fea=True))
+    return cases
+
+
+#: Astaneh et al. (1989) single-plate tests, as tabulated by Ashakul (2004),
+#: Tables 2.2 and 2.3.  The failure load is the measured connection shear.
+#: name, n, plate depth [in], V [kip], M_bolt [kip-in], Rult [kip], note
+_ASTANEH_DATA = (
+    ("A1", 3, 9.0, 94, 20, 37, "A325-N, 3 bolts"),
+    ("A2", 5, 15.0, 137, 314, 37, "A325-N, 5 bolts"),
+    ("A3", 7, 21.0, 160, 306, 37, "A325-N, 7 bolts"),
+    ("A4", 3, 8.25, 79, -47, 49, "A490-N, 3 bolts"),
+    ("A5", 5, 14.25, 130, 273, 49, "A490-N, 5 bolts"),
+    ("A6", 9, 27.0, 260, 591, 49, "A490-N, 9 bolts"),
+)
+
+
+def astaneh_cases() -> List[ExperimentalCase]:
+    cases = []
+    for name, n, depth_in, v_kip, m_kipin, rult_kip, note in _ASTANEH_DATA:
+        h = depth_in * INCH
+        e = (m_kipin / v_kip) * INCH
+        cases.append(ExperimentalCase(
+            source=ASTANEH, name=name,
+            set_key="astaneh_1989", set_name="Astaneh et al. (1989)",
+            bolts_xy=row(n, 3.0 * INCH), eccentricity=e,
+            bolt_diameter=0.75 * INCH,
+            bolt_rult=rult_kip * 4448.2216152605,
+            plate_thickness=0.375 * INCH,
+            plate_fu=58.0 * 6894757.2932,
+            plate_fy=36.0 * 6894757.2932,
+            plate_width=4.25 * INCH, plate_height=h,
+            failure_load=v_kip * 4448.2216152605,
+            note=note + " (single-plate connection)",
+            supports_analytical=False, supports_fea=True))
+    return cases
+
+
+#: Sarkar (1992) tests as tabulated by Ashakul (2004), Tables 2.4/2.5.
+#: Tests with weld failures are omitted (S2); the selected load is the
+#: maximum connection shear reported for the specimen.
+#: name, n, plate depth [in], V [kip], note
+_SARKAR_DATA = (
+    ("S1", 2, 6.0, 64.3, "A325-X, 2 bolts, plate distortion"),
+    ("S3", 4, 12.0, 93.0, "A325-N, 4 bolts"),
+    ("S4", 4, 12.0, 129.0, "A325-N, 4 bolts, short slots"),
+    ("S5", 6, 18.0, 119.0, "A325-N, 6 bolts"),
+    ("S6", 6, 18.0, 194.0, "A325-N, 6 bolts, short slots"),
+)
+
+
+def sarkar_cases() -> List[ExperimentalCase]:
+    cases = []
+    for name, n, depth_in, v_kip, note in _SARKAR_DATA:
+        cases.append(ExperimentalCase(
+            source=SARKAR, name=name,
+            set_key="sarkar_1992", set_name="Sarkar (1992)",
+            bolts_xy=row(n, 3.0 * INCH), eccentricity=0.0,
+            bolt_diameter=0.75 * INCH,
+            bolt_rult=37.0 * 4448.2216152605,
+            plate_thickness=0.375 * INCH,
+            plate_fu=58.0 * 6894757.2932,
+            plate_fy=36.0 * 6894757.2932,
+            plate_width=5.0 * INCH,
+            plate_height=depth_in * INCH,
+            failure_load=v_kip * 4448.2216152605,
+            note=note + " (single-plate connection)",
+            supports_analytical=False, supports_fea=True))
+    return cases
+
+
+def experimental_sets() -> Dict[str, List[ExperimentalCase]]:
+    """Named experimental sets available for comparison/calibration."""
+    return {
+        "badawi_1983": badawi_cases(),
+        "crawford_kulak_1968": crawford_kulak_cases(),
+        "denavit_2021": denavit_cases(),
+        "astaneh_1989": astaneh_cases(),
+        "sarkar_1992": sarkar_cases(),
+    }
+
+
+def all_experimental_cases() -> List[ExperimentalCase]:
+    return [c for cases in experimental_sets().values() for c in cases]
+
+
+def select_experimental_cases(selection=None) -> List[ExperimentalCase]:
+    """Filter the experimental database.
+
+    ``selection`` is ``None`` (the historical Badawi-only default), a set key
+    or list of set keys, or a mapping ``{set_key: None|"all"| [sample, ...]}``.
+    Case names may be given with or without the ``set_key:`` prefix.
+    """
+    sets = experimental_sets()
+    if selection is None:
+        return experimental_cases()
+    if isinstance(selection, str):
+        selection = {selection: None}
+    elif isinstance(selection, (list, tuple, set)):
+        selection = {str(k): None for k in selection}
+    out = []
+    for key, samples in selection.items():
+        if key not in sets:
+            raise KeyError(f"unknown experimental set: {key}")
+        cases = sets[key]
+        if samples in (None, "all", "*"):
+            out.extend(cases)
+            continue
+        wanted = {str(s).split(":")[-1] for s in samples}
+        out.extend(c for c in cases if c.name in wanted)
+    return out
+
+
 def experimental_cases() -> List[ExperimentalCase]:
-    """All experimental specimens the program can model."""
+    """Historical default set (Badawi 1983, ten full-size specimens)."""
     return badawi_cases()
 
 

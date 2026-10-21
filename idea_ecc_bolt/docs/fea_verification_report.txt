@@ -36,3 +36,17 @@ than by bolt shear.  The FE result is therefore reported as a fallback and not
 as a replacement for a commercial CBFEM calculation; the plate model actually
 used is printed with every result.
 ==============================================================================
+
+Calibration data selection
+--------------------------
+The Calibrate dialog (and `python -m eccbolt.calibration`) can select whole
+experimental sets or individual samples.  Available sets:
+
+  badawi_1983            10 double-angle specimens
+  crawford_kulak_1968     8 full-size double-angle specimens (C&K only)
+  denavit_2021           22 single-bolt bearing/tearout tests (FE only)
+  astaneh_1989            6 single-plate shear connections (FE only)
+  sarkar_1992             5 single-plate shear connections (FE only)
+
+The FE calibration fits `ConnectionInput.fem.capacity_factor` by minimizing
+the relative least-squares error of the selected FE-compatible specimens.

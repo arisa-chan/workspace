@@ -455,6 +455,7 @@ class _FeModel:
                                         max(float(pa.get("fu", 450e6)),
                                             float(pb.get("fu", 450e6)))))
         self.max_steps = int(model.get("num_steps", 60))
+        self.capacity_factor = float(model.get("capacity_factor", 1.0))
         self.verbose = bool(model.get("verbose", False))
         self._mat_tag = 100
         self._node_tag = 1
@@ -854,9 +855,13 @@ class _FeModel:
                 history, failure_mode: str) -> Dict:
         r_ult = self.rult * bolt_ratio(self.delta_max, self.mu, self.lam)
         mags = [math.hypot(f[0], f[1]) for f in forces]
+        raw_capacity = capacity
+        capacity = capacity * self.capacity_factor
         return dict(
             ok=True,
             capacity=capacity,
+            raw_capacity=raw_capacity,
+            capacity_factor=self.capacity_factor,
             bolt_ult=r_ult,
             failure_mode=failure_mode,
             plate_fu=self.plate_fu,
@@ -923,6 +928,7 @@ def model_from_connection(ci, mesh: Optional[float] = None,
         "plate_criterion": fem.plate_criterion,
         "plate_stress_percentile": fem.plate_stress_percentile,
         "plate_filter_radius": fem.plate_filter_radius,
+        "capacity_factor": fem.capacity_factor,
     }
     model.update(options)
     return model

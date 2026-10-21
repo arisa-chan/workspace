@@ -146,6 +146,8 @@ class FemOptions:
     plate_stress_percentile: float = 0.95
     plate_filter_radius: float = 2.0       # x hole radius
     num_steps: int = 80
+    #: global bias factor applied to the FE capacity after calibration
+    capacity_factor: float = 1.0
 
 
 @dataclass
@@ -213,6 +215,8 @@ class ConnectionInput:
             errs.append("FE mesh size must be positive.")
         if not 0.0 < self.fem.plate_stress_percentile <= 1.0:
             errs.append("Plate stress percentile must be in (0, 1].")
+        if self.fem.capacity_factor <= 0:
+            errs.append("FE capacity factor must be positive.")
         return errs
 
 
