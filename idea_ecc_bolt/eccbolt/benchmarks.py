@@ -175,6 +175,8 @@ class ExperimentalCase:
             "load": dict(P=ci.load.P, e=ci.load.e, h=0.0,
                          theta=ci.load.theta),
             "mesh": mesh,
+            "mesh_max_element": mesh,
+            "mesh_min_element": ci.fem.mesh_min_element,
             "capacity_hint": max(self.analytical_capacity() * 1.6,
                                  0.95 * ci.n_bolts * ci.bolt_rult()),
             "num_steps": 80,

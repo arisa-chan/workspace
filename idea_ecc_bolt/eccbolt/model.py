@@ -135,7 +135,9 @@ class FemOptions:
     nonlinear C&K bolt law and J2-plastic plates.  They can be overridden by
     the GUI/JSON without changing the analytical C&K model.
     """
-    mesh: Optional[float] = None           # m, target element size
+    mesh: Optional[float] = None           # legacy uniform target size (m)
+    mesh_min_element: Optional[float] = None   # m, finest element near holes
+    mesh_max_element: Optional[float] = None   # m, coarsest element far away
     triangulate: bool = True               # circular holes via Delaunay mesh
     plate_nonlinear: bool = True           # J2 plasticity (False = elastic)
     contact_gap: bool = True               # one-sided bearing with clearance
@@ -211,8 +213,15 @@ class ConnectionInput:
             errs.append("Bolt deformation delta_max must be positive.")
         if self.load.P <= 0:
             errs.append("Load magnitude must be positive.")
-        if self.fem.mesh is not None and self.fem.mesh <= 0:
-            errs.append("FE mesh size must be positive.")
+        for label, value in (("FE mesh", self.fem.mesh),
+                             ("FE minimum element", self.fem.mesh_min_element),
+                             ("FE maximum element", self.fem.mesh_max_element)):
+            if value is not None and value <= 0:
+                errs.append(f"{label} size must be positive.")
+        if (self.fem.mesh_min_element is not None
+                and self.fem.mesh_max_element is not None
+                and self.fem.mesh_min_element > self.fem.mesh_max_element):
+            errs.append("FE minimum element size cannot exceed the maximum.")
         if not 0.0 < self.fem.plate_stress_percentile <= 1.0:
             errs.append("Plate stress percentile must be in (0, 1].")
         if self.fem.capacity_factor <= 0:
@@ -223,6 +232,57 @@ class ConnectionInput:
 # ---------------------------------------------------------------------------
 # arbitrary / random bolt arrangements
 # ---------------------------------------------------------------------------
+def plate_overlap(ci: "ConnectionInput") -> Tuple[float, float, float, float]:
+    """Intersection of the two plate outlines in connection coordinates.
+
+    Returns ``(x0, x1, y0, y1)``.  A random bolt group must lie inside this
+    region so that every hole is contained in both connected plates.
+    """
+    ax0, ax1, ay0, ay1 = _outline_bounds(ci.plate_a)
+    bx0, bx1, by0, by1 = _outline_bounds(ci.plate_b)
+    return (max(ax0, bx0), min(ax1, bx1), max(ay0, by0), min(ay1, by1))
+
+
+def _outline_bounds(plate: "Plate") -> Tuple[float, float, float, float]:
+    ob = plate.outline()
+    xs = [p[0] for p in ob]
+    ys = [p[1] for p in ob]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def random_bolt_group_in_connection(
+        ci: "ConnectionInput", n: int, min_dist: float,
+        seed: Optional[int] = None, max_tries: int = 50000,
+        edge_margin: Optional[float] = None) -> List[Tuple[float, float]]:
+    """Random bolts guaranteed to remain inside the two-plate overlap.
+
+    The edge margin keeps the complete hole (not merely its centre) inside both
+    plate outlines.  The default margin is one bolt diameter.
+    """
+    import random as _rnd
+    x0, x1, y0, y1 = plate_overlap(ci)
+    margin = (ci.bolt_diameter if edge_margin is None else edge_margin)
+    x0, x1 = x0 + margin, x1 - margin
+    y0, y1 = y0 + margin, y1 - margin
+    if x0 >= x1 or y0 >= y1:
+        raise ValueError("the plate overlap is too small for the requested "
+                         "edge margin")
+    rng = _rnd.Random(seed)
+    pts: List[Tuple[float, float]] = []
+    tries = 0
+    while len(pts) < n and tries < max_tries:
+        tries += 1
+        cand = (rng.uniform(x0, x1), rng.uniform(y0, y1))
+        if all(math.hypot(cand[0] - p[0], cand[1] - p[1]) >= min_dist
+               for p in pts):
+            pts.append(cand)
+    if len(pts) < n:
+        raise ValueError(
+            f"could not place {n} bolts with min distance {min_dist} in the "
+            f"plate overlap {x1-x0:.3f} x {y1-y0:.3f} m")
+    return pts
+
+
 def random_bolt_group(n: int, width: float, height: float,
                       min_dist: float, seed: Optional[int] = None,
                       max_tries: int = 20000) -> List[Tuple[float, float]]:

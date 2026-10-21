@@ -21,6 +21,11 @@ def test_fea_model_contains_holes_clearance_and_nonlinear_plates():
     assert model["plate_nonlinear"] is True
     assert model["mu"] == pytest.approx(ci.bolt_mat.mu)
     assert model["ck_lambda"] == pytest.approx(ci.bolt_mat.ck_lambda)
+    ci.fem.mesh_min_element = 0.003
+    ci.fem.mesh_max_element = 0.012
+    model = model_from_connection(ci)
+    assert model["mesh_min_element"] == pytest.approx(0.003)
+    assert model["mesh_max_element"] == pytest.approx(0.012)
 
 
 def test_fea_fallback_predicts_a_capacity_for_a_physical_specimen():

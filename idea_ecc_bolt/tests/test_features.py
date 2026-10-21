@@ -15,7 +15,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from eccbolt.analysis import analyze
 from eccbolt.icr import solve_icr
 from eccbolt.iom import IomBuilder, member_load_components
-from eccbolt.model import INCH, KIP, ConnectionInput, random_bolt_group
+from eccbolt.model import (INCH, KIP, ConnectionInput, Plate,
+                           plate_overlap, random_bolt_group,
+                           random_bolt_group_in_connection)
 from eccbolt.presets import crawford_kulak_example
 
 
@@ -33,6 +35,20 @@ def test_random_pattern_generation():
     d = sorted({round(math.hypot(a[0] - b[0], a[1] - b[1]), 6)
                 for i, a in enumerate(pts) for b in pts[i + 1:]})
     assert len(d) > 3
+
+
+def test_random_pattern_stays_inside_plate_overlap():
+    ci = ConnectionInput(
+        bolt_diameter=0.019,
+        plate_a=Plate("A", width=0.30, height=0.40),
+        plate_b=Plate("B", width=0.20, height=0.26, cx=0.04, cy=0.03))
+    x0, x1, y0, y1 = plate_overlap(ci)
+    pts = random_bolt_group_in_connection(ci, 8, 0.025, seed=5)
+    margin = ci.bolt_diameter
+    for x, y in pts:
+        assert x0 + margin - 1e-12 <= x <= x1 - margin + 1e-12
+        assert y0 + margin - 1e-12 <= y <= y1 - margin + 1e-12
+    assert len(pts) == 8
 
 
 def test_random_pattern_iom_roundtrip():

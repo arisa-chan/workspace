@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from .analysis import analyze
 from .model import (KIP, KSI, MM, INCH, BoltMaterial, ConnectionInput,
                     LoadSpec, Plate, SteelMaterial)
-from .view2d import Connection2DView
+from .view2d import Connection2DView, FeMeshView
 from .view3d import Connection3DView
 
 APP_NAME = "EccentricBolt"
@@ -208,6 +208,7 @@ class MainWindow(QMainWindow):
         self.units = Units("metric")
         self.ci: Optional[ConnectionInput] = None
         self.ana = None
+        self._fea_result = None
         self.fields = []          # (spinbox, kind, getter, setter)
         self._loading = False
         self.settings = QSettings("EccentricBolt", "gui")
@@ -223,9 +224,11 @@ class MainWindow(QMainWindow):
         center = QTabWidget()
         self.view3d = Connection3DView()
         self.view2d = Connection2DView()
+        self.view_mesh = FeMeshView()
         self.log_view = QPlainTextEdit(readOnly=True)
         center.addTab(self.view3d, "3D connection view")
         center.addTab(self.view2d, "Bolt group (2D)")
+        center.addTab(self.view_mesh, "FE mesh / stress")
         center.addTab(self.log_view, "Log")
         split.addWidget(center)
         split.addWidget(self._build_results())
@@ -262,6 +265,9 @@ class MainWindow(QMainWindow):
         m_run.addAction(act)
         act = QAction("Run &FE fallback (OpenSees)...", self)
         act.triggered.connect(self.run_fea)
+        m_run.addAction(act)
+        act = QAction("&How the FE fallback works...", self)
+        act.triggered.connect(self.show_fea_help)
         m_run.addAction(act)
         act = QAction("&Calibrate C&&K parameters...", self)
         act.triggered.connect(self.calibrate_ck)
@@ -508,6 +514,20 @@ class MainWindow(QMainWindow):
              "IDEA util.", "FE V", "FE util."])
         self.res_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         vl.addWidget(self.res_table, 3)
+        mesh_opts = QHBoxLayout()
+        self.chk_mesh = QCheckBox("FE mesh")
+        self.chk_mesh.setChecked(True)
+        self.chk_stress = QCheckBox("stress contours")
+        self.chk_stress.setChecked(True)
+        self.chk_boltvec = QCheckBox("bolt force vectors")
+        self.chk_boltvec.setChecked(True)
+        for c in (self.chk_mesh, self.chk_stress, self.chk_boltvec):
+            c.toggled.connect(self._update_mesh_view)
+            mesh_opts.addWidget(c)
+        self.btn_calibrate = QPushButton("Calibrate")
+        self.btn_calibrate.clicked.connect(self.calibrate_ck)
+        mesh_opts.addWidget(self.btn_calibrate)
+        vl.addLayout(mesh_opts)
         self.chk_view = QPlainTextEdit(readOnly=True)
         self.chk_view.setMaximumHeight(180)
         vl.addWidget(self.chk_view, 1)
@@ -517,6 +537,7 @@ class MainWindow(QMainWindow):
     def set_model(self, ci: ConnectionInput):
         self.ci = ci
         self.ana = None
+        self._fea_result = None
         self._loading = True
         for spin, kind, getter, setter in self.fields:
             v = getter()
@@ -549,6 +570,7 @@ class MainWindow(QMainWindow):
         self._loading = False
         self.ana = None
         self.update_views()
+        self._update_mesh_view()
         self.statusBar().showMessage(f"Loaded: {ci.title}")
 
     def _fill_bolt_table(self):
@@ -620,22 +642,28 @@ class MainWindow(QMainWindow):
             self.update_views()
 
     def bolt_random(self):
-        """Arbitrary (random) bolt pattern - the IDEA BoltGrid accepts any
-        free list of hole positions, not only regular grids."""
-        from .model import random_bolt_group
+        """Random bolt pattern inside the *overlap* of both plates."""
+        from .model import plate_overlap, random_bolt_group_in_connection
+        x0, x1, y0, y1 = plate_overlap(self.ci)
+        if x0 >= x1 or y0 >= y1:
+            QMessageBox.warning(self, "Random pattern",
+                                "The two plates do not overlap.")
+            return
         dlg = QDialog(self)
-        dlg.setWindowTitle("Random bolt pattern (arbitrary positions)")
+        dlg.setWindowTitle("Random bolt pattern (inside plate overlap)")
         fl = QFormLayout(dlg)
-        n = QSpinBox(); n.setRange(1, 40); n.setValue(6)
-        wdt = QDoubleSpinBox(); wdt.setRange(1, 10000); wdt.setValue(200)
-        hgt = QDoubleSpinBox(); hgt.setRange(1, 10000); hgt.setValue(300)
+        info = QLabel(
+            "The generator uses only the common area of both plates, with "
+            f"a {self.units.len(self.ci.bolt_diameter):.2f} "
+            f"{self.units.u_len} edge margin for the complete hole.")
+        info.setWordWrap(True)
+        fl.addRow(info)
+        n = QSpinBox(); n.setRange(1, 60); n.setValue(6)
         md = QDoubleSpinBox(); md.setRange(0, 10000); md.setValue(
             max(2.2 * self.ci.bolt_diameter / INCH if not self.units.metric
                 else 2.2 * self.ci.bolt_diameter * 1000, 10))
         seed = QSpinBox(); seed.setRange(0, 99999); seed.setValue(1)
         fl.addRow("Number of bolts", n)
-        fl.addRow(f"Field width [{self.units.u_len}]", wdt)
-        fl.addRow(f"Field height [{self.units.u_len}]", hgt)
         fl.addRow(f"Min. spacing [{self.units.u_len}]", md)
         fl.addRow("Random seed", seed)
         bb = QHBoxLayout()
@@ -645,10 +673,8 @@ class MainWindow(QMainWindow):
         fl.addRow(bb)
         if dlg.exec() == QDialog.Accepted:
             try:
-                pts = random_bolt_group(
-                    n.value(),
-                    self.units.len(wdt.value(), to_si=True),
-                    self.units.len(hgt.value(), to_si=True),
+                pts = random_bolt_group_in_connection(
+                    self.ci, n.value(),
                     self.units.len(md.value(), to_si=True),
                     seed=seed.value())
             except ValueError as exc:
@@ -657,9 +683,8 @@ class MainWindow(QMainWindow):
             self.ci.bolts_xy = pts
             self._fill_bolt_table()
             self.update_views()
-            self._log(f"Random bolt pattern generated: {len(pts)} bolts "
-                      f"(arbitrary positions are fully supported by the "
-                      f"IDEA BoltGrid).")
+            self._log(f"Random bolt pattern generated: {len(pts)} bolts, "
+                      f"all inside the plate overlap.")
 
     def _grade_changed(self, txt):
         grades = {"A325": (825e6, 580e6), "A490": (1035e6, 895e6),
@@ -702,6 +727,21 @@ class MainWindow(QMainWindow):
         self.view3d.draw_connection(self.ci, ic=ic, bolt_forces=bf)
         self.view2d.draw_group(self.ci, ic=ic, bolt_forces=bf,
                                scale_unit=f"[{self.units.u_force}]")
+
+    def _update_mesh_view(self, *_):
+        if not hasattr(self, "view_mesh"):
+            return
+        if not any((self.chk_mesh.isChecked(), self.chk_stress.isChecked(),
+                    self.chk_boltvec.isChecked())):
+            self.view_mesh.draw_mesh(None)
+            return
+        mesh = None
+        if self._fea_result:
+            mesh = self._fea_result.get("mesh")
+        self.view_mesh.draw_mesh(
+            mesh, show_stress=self.chk_stress.isChecked(),
+            show_forces=self.chk_boltvec.isChecked(),
+            title="FE fallback mesh")
 
     def run_analytical(self):
         errs = self.ci.validate()
@@ -935,6 +975,42 @@ class MainWindow(QMainWindow):
                              "exercise the pipeline without an IDEA install.")
 
     # ------------------------------------------------------- FE fallback
+    def show_fea_help(self):
+        text = (
+            "How the OpenSees FE fallback works\n"
+            "==================================\n\n"
+            "1. Each plate is meshed as a 2-D plane-stress body.  The mesh uses "
+            "the maximum element size away from the bolts and the minimum "
+            "element size on the hole boundaries and in the bearing zone.\n\n"
+            "2. Circular holes of diameter d + clearance are cut out of both "
+            "plates.  The bolt is represented by two pin nodes connected by "
+            "the Crawford & Kulak nonlinear spring; one-sided bearing trusses "
+            "transmit force between each pin and its hole boundary.  The "
+            "initial radial gap models the hole clearance.\n\n"
+            "3. The plates can be elastic or J2-plastic (fy/fu from the input). "
+            "The immediate bearing zone and the fixed boundary layer remain "
+            "elastic to keep the local contact stress numerically stable; if "
+            "the J2 update still fails, the run is repeated elastically and "
+            "that is reported in the result.\n\n"
+            "4. A load-controlled push-over is run.  Bolt deformation is the "
+            "relative displacement of the two pin nodes, including bolt shear, "
+            "plate bearing and clearance.  Capacity is the first limit state: "
+            "the critical bolt reaches delta_max, or the nonlocal plate stress "
+            "reaches fu.\n\n"
+            "5. The FE mesh tab shows the mesh, element von Mises stress "
+            "contours and the calculated bolt force vectors.  The FE capacity "
+            "can be bias-calibrated against selected physical tests with the "
+            "Calibrate button.\n\n"
+            "The fallback is not a replacement for IDEA StatiCa CBFEM; it is "
+            "an offline check that includes the effects the rigid-plate C&K "
+            "method cannot represent.")
+        box = QMessageBox(self)
+        box.setWindowTitle("How the FE fallback works")
+        box.setIcon(QMessageBox.Information)
+        box.setText("OpenSees nonlinear FE fallback")
+        box.setInformativeText(text)
+        box.exec()
+
     def run_fea(self):
         if self.ci is None:
             return
@@ -947,11 +1023,21 @@ class MainWindow(QMainWindow):
         dlg = QDialog(self)
         dlg.setWindowTitle("OpenSees FE fallback")
         fl = QFormLayout(dlg)
-        mesh = QDoubleSpinBox()
-        mesh.setRange(0.0, 100.0)
-        mesh.setDecimals(1)
-        mesh.setSuffix(" mm")
-        mesh.setValue(float(self.settings.value("fe_mesh_mm", 8.0)))
+        mesh_min = QDoubleSpinBox()
+        mesh_min.setRange(0.0, 100.0)
+        mesh_min.setDecimals(2)
+        mesh_min.setSuffix(" mm")
+        mesh_min.setValue(float(self.settings.value(
+            "fe_mesh_min_mm",
+            (self.ci.fem.mesh_min_element or 0.004) * 1000)))
+        mesh_max = QDoubleSpinBox()
+        mesh_max.setRange(0.0, 200.0)
+        mesh_max.setDecimals(2)
+        mesh_max.setSuffix(" mm")
+        mesh_max.setValue(float(self.settings.value(
+            "fe_mesh_max_mm",
+            (self.ci.fem.mesh_max_element
+             or self.ci.fem.mesh or 0.008) * 1000)))
         chk_nl = QCheckBox("nonlinear J2 plates")
         chk_nl.setChecked(self.settings.value("fe_nonlinear", "1") == "1")
         chk_gap = QCheckBox("model hole clearance (bearing gap)")
@@ -965,26 +1051,37 @@ class MainWindow(QMainWindow):
                       "clearance and the vector C&K bolt law.")
         info.setWordWrap(True)
         fl.addRow(info)
-        fl.addRow("Mesh size", mesh)
+        fl.addRow("Minimum element size", mesh_min)
+        fl.addRow("Maximum element size", mesh_max)
         fl.addRow("Capacity factor", factor)
         fl.addRow(chk_nl)
         fl.addRow(chk_gap)
         hb = QHBoxLayout()
         okb = QPushButton("Run")
         okb.clicked.connect(dlg.accept)
-        hb.addWidget(okb)
+        helpb = QPushButton("How it works")
+        helpb.clicked.connect(self.show_fea_help)
+        calb = QPushButton("Calibrate")
+        calb.clicked.connect(lambda: (dlg.reject(), self.calibrate_ck()))
+        hb.addWidget(okb); hb.addWidget(calb); hb.addWidget(helpb)
         fl.addRow(hb)
         if dlg.exec() != QDialog.Accepted:
             return
-        self.settings.setValue("fe_mesh_mm", str(mesh.value()))
+        self.settings.setValue("fe_mesh_min_mm", str(mesh_min.value()))
+        self.settings.setValue("fe_mesh_max_mm", str(mesh_max.value()))
         self.settings.setValue("fe_nonlinear", "1" if chk_nl.isChecked() else "0")
         self.settings.setValue("fe_gap", "1" if chk_gap.isChecked() else "0")
+        self.ci.fem.mesh_min_element = (mesh_min.value() / 1000.0
+                                        if mesh_min.value() else None)
+        self.ci.fem.mesh_max_element = (mesh_max.value() / 1000.0
+                                        if mesh_max.value() else None)
+        self.ci.fem.mesh = self.ci.fem.mesh_max_element
         self.ci.fem.capacity_factor = factor.value()
         from .fe_fallback import model_from_connection
         model = model_from_connection(
-            self.ci, mesh=mesh.value() / 1000.0 if mesh.value() else None,
+            self.ci, mesh=self.ci.fem.mesh_max_element,
             plate_nonlinear=chk_nl.isChecked(),
-            contact_gap=chk_gap.isChecked())
+            contact_gap=chk_gap.isChecked(), return_mesh=True)
         self._fea_worker = FeaWorker(model)
         self._fea_worker.log.connect(self._log)
         self._fea_worker.finished_ok.connect(self._fea_done)
@@ -1022,6 +1119,8 @@ class MainWindow(QMainWindow):
         if res.get("notes"):
             lines.append(str(res["notes"]))
         self.chk_view.setPlainText("\n".join(lines))
+        self._fea_result = res
+        self._update_mesh_view()
         self._log("\n".join(lines))
         self.statusBar().showMessage("FE fallback finished.")
 

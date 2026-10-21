@@ -164,13 +164,15 @@ class _PlateMesh:
                  mat_tag: int, first_node: int, first_elem: int,
                  mat_near: Optional[int] = None,
                  near_radius: Optional[float] = None,
-                 boundary_width: float = 0.05):
+                 boundary_width: float = 0.05,
+                 min_target: Optional[float] = None):
         self.ops = ops
         self.plate = plate
         self.bolts = list(bolts)
         self.rh = hole_radius
         self.rb = bolt_radius
         self.target = target
+        self.min_target = target if min_target is None else min_target
         self.mat_tag = mat_tag
         self.mat_near = mat_near
         self.near_radius = (near_radius if near_radius is not None
@@ -190,9 +192,15 @@ class _PlateMesh:
         ops = self.ops
         rh, target = self.rh, self.target
         forced_x, forced_z = [], []
+        fine = max(self.min_target, 1e-4)
+        nfine = min(120, max(2, int(math.ceil(6.0 * rh / fine))))
         for bx, bz in self.bolts:
             for f in (0.0, -rh, rh, -rh - target, rh + target,
                       -0.5 * rh, 0.5 * rh):
+                forced_x.append(bx + f)
+                forced_z.append(bz + f)
+            for j in range(nfine + 1):
+                f = -3.0 * rh + 6.0 * rh * j / nfine
                 forced_x.append(bx + f)
                 forced_z.append(bz + f)
         xs = _grid_lines(self.x0, self.x1, forced_x, target)
@@ -281,13 +289,15 @@ class _TriPlateMesh:
                  mat_tag: int, first_node: int, first_elem: int,
                  mat_near: Optional[int] = None,
                  near_radius: Optional[float] = None,
-                 boundary_width: float = 0.05):
+                 boundary_width: float = 0.05,
+                 min_target: Optional[float] = None):
         self.ops = ops
         self.plate = plate
         self.bolts = list(bolts)
         self.rh = hole_radius
         self.rb = bolt_radius
         self.target = target
+        self.min_target = target if min_target is None else min_target
         self.mat_tag = mat_tag
         self.mat_near = mat_near
         self.near_radius = (near_radius if near_radius is not None
@@ -333,17 +343,34 @@ class _TriPlateMesh:
             add(self.x0, z)
             add(self.x1, z)
 
-        # points on every hole circumference
+        # points on every hole circumference; refined by the minimum size
+        fine = max(self.min_target, 1e-4)
         ring_keys: List[List[Tuple[float, float]]] = []
         for bx, bz in self.bolts:
-            ntheta = max(16, int(math.ceil(2.0 * math.pi * self.rh
-                                           / (0.8 * target))))
+            ntheta = min(160, max(16, int(math.ceil(
+                2.0 * math.pi * self.rh / (0.8 * fine)))))
             keys = []
             for k in range(ntheta):
                 a = 2.0 * math.pi * k / ntheta
                 keys.append(add(bx + self.rh * math.cos(a),
                                 bz + self.rh * math.sin(a)))
             ring_keys.append(keys)
+            # one or more transition rings at the minimum element size
+            r_ref = self.rh
+            while r_ref < self.rh + 2.0 * target:
+                r_ref = min(r_ref + max(fine, 0.35 * target),
+                            self.rh + 2.0 * target)
+                nt = min(200, max(16, int(math.ceil(
+                    2.0 * math.pi * r_ref / max(fine, 1e-4)))))
+                for k in range(nt):
+                    a = 2.0 * math.pi * (k + 0.5) / nt
+                    x = bx + r_ref * math.cos(a)
+                    z = bz + r_ref * math.sin(a)
+                    if (self.x0 + 1e-9 < x < self.x1 - 1e-9
+                            and self.z0 + 1e-9 < z < self.z1 - 1e-9):
+                        add(x, z)
+                if r_ref >= self.rh + 2.0 * target - 1e-12:
+                    break
 
         # interior grid points, excluding the hole interiors
         n_interior = max(1, int(math.ceil((self.x1 - self.x0) / target)))
@@ -456,6 +483,7 @@ class _FeModel:
                                             float(pb.get("fu", 450e6)))))
         self.max_steps = int(model.get("num_steps", 60))
         self.capacity_factor = float(model.get("capacity_factor", 1.0))
+        self.return_mesh = bool(model.get("return_mesh", False))
         self.verbose = bool(model.get("verbose", False))
         self._mat_tag = 100
         self._node_tag = 1
@@ -512,12 +540,17 @@ class _FeModel:
         ops.model("basic", "-ndm", 2, "-ndf", 2)
 
         if self.model_holes:
-            target = float(self.model.get("mesh", 0.0) or 0.0)
+            span = max(float(self.pa["w"]), float(self.pa["h"]),
+                       float(self.pb["w"]), float(self.pb["h"]))
+            target = float(self.model.get("mesh_max_element", 0.0)
+                           or self.model.get("mesh", 0.0) or 0.0)
             if target <= 0.0:
-                span = max(float(self.pa["w"]), float(self.pa["h"]),
-                           float(self.pb["w"]), float(self.pb["h"]))
                 target = span / 12.0
-            target = min(target, max(self.rh / 1.5, 0.0015))
+            fine = float(self.model.get("mesh_min_element", 0.0) or 0.0)
+            if fine <= 0.0:
+                fine = min(target, max(self.rh / 1.5, 0.0015))
+            target = max(target, 1e-4)
+            fine = max(min(fine, target), 1e-4)
 
             mat_a = self._plate_material(self.pa)
             mat_b = self._plate_material(self.pb)
@@ -536,14 +569,16 @@ class _FeModel:
             self.mesh_a = mesh_cls(ops, self.pa, self.bolts, self.rh,
                                    self.rb, target, mat_a, 1, 1,
                                    mat_near=near_a, near_radius=near_r,
-                                   boundary_width=self.boundary_width)
+                                   boundary_width=self.boundary_width,
+                                   min_target=fine)
             self._node_tag = self.mesh_a.next_node
             self._elem_tag = self.mesh_a.next_elem
             self.mesh_b = mesh_cls(ops, self.pb, self.bolts, self.rh,
                                    self.rb, target, mat_b,
                                    self._node_tag, self._elem_tag,
                                    mat_near=near_b, near_radius=near_r,
-                                   boundary_width=self.boundary_width)
+                                   boundary_width=self.boundary_width,
+                                   min_target=fine)
             self._node_tag = self.mesh_b.next_node
             self._elem_tag = self.mesh_b.next_elem
             for nd in self.mesh_a.perimeter_nodes():
@@ -851,12 +886,56 @@ class _FeModel:
                             self._plate_stress(), self.max_steps, history,
                             "not reached")
 
+    def _element_von_mises(self) -> Dict[int, float]:
+        """Peak von Mises stress of every plate element [Pa]."""
+        ops = self.ops
+        out = {}
+        for tag in self.plate_elems:
+            try:
+                s = ops.eleResponse(tag, "stresses")
+            except Exception:
+                s = []
+            vals = []
+            for k in range(0, len(s) - 2, 3):
+                sx, sz, txz = float(s[k]), float(s[k + 1]), float(s[k + 2])
+                vals.append(math.sqrt(max(
+                    sx * sx + sz * sz - sx * sz + 3.0 * txz * txz, 0.0)))
+            out[tag] = max(vals) if vals else 0.0
+        return out
+
+    def mesh_export(self) -> Dict:
+        """Nodes, elements and element stresses for the GUI mesh view."""
+        stress = self._element_von_mises()
+        plates = []
+        for mesh, name in ((self.mesh_a, "Support plate"),
+                           (self.mesh_b, "Loaded plate")):
+            nodes = [[tag, x, z] for tag, (x, z) in mesh.coords.items()]
+            elements = []
+            values = []
+            for tag in mesh.elems:
+                try:
+                    elements.append(list(self.ops.eleNodes(tag)))
+                    values.append(stress.get(tag, 0.0))
+                except Exception:
+                    pass
+            plates.append(dict(name=name, nodes=nodes,
+                               elements=elements, stress=values))
+        return dict(plates=plates, bolts=list(self.bolts),
+                    bolt_diameter=self.bolt_d, hole_radius=self.rh,
+                    mesh_min=float(self.model.get("mesh_min_element", 0.0)
+                                   or 0.0),
+                    mesh_max=float(self.model.get("mesh_max_element", 0.0)
+                                   or self.model.get("mesh", 0.0) or 0.0))
+
     def _result(self, capacity: float, forces, deltas, vm, iterations,
                 history, failure_mode: str) -> Dict:
         r_ult = self.rult * bolt_ratio(self.delta_max, self.mu, self.lam)
         mags = [math.hypot(f[0], f[1]) for f in forces]
         raw_capacity = capacity
         capacity = capacity * self.capacity_factor
+        mesh_data = self.mesh_export() if self.return_mesh else None
+        if mesh_data is not None:
+            mesh_data["forces"] = forces
         return dict(
             ok=True,
             capacity=capacity,
@@ -884,6 +963,7 @@ class _FeModel:
             max_deformation=max(deltas) if deltas else 0.0,
             iterations=iterations,
             history=history,
+            mesh=mesh_data,
             message="ok")
 
 
@@ -917,6 +997,10 @@ def model_from_connection(ci, mesh: Optional[float] = None,
                         else pb.cy + pb.height / 2.0),
                      theta=ci.load.theta),
         "mesh": fem.mesh if mesh is None else mesh,
+        "mesh_min_element": fem.mesh_min_element,
+        "mesh_max_element": (fem.mesh_max_element if fem.mesh_max_element
+                             is not None else
+                             (fem.mesh if mesh is None else mesh)),
         "capacity_hint": capacity_hint,
         "num_steps": fem.num_steps,
         "plate_nonlinear": fem.plate_nonlinear,

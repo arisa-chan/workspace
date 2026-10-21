@@ -72,8 +72,11 @@ there is no regularity requirement, and optional per-position `SlottedHole`
 entries exist as well.  The GUI therefore accepts any coordinates typed into
 the bolt table **and** offers a *Random...* generator (rejection sampling with
 a minimum spacing and a seed) in addition to the regular *Grid...* generator.
-Random patterns are exported verbatim into the IOM and survive the whole
-REST pipeline (covered by `tests/test_features.py`).
+The random generator now samples only the **intersection of the two plate
+outlines** and keeps a hole-edge margin inside both plates, so no random bolt
+can fall outside the physical overlap.  Random patterns are exported verbatim
+into the IOM and survive the whole REST pipeline (covered by
+`tests/test_features.py`).
 
 ## 1c. Angled loads - resolved into force components
 
@@ -217,11 +220,13 @@ rotational restraint, so the program offers two calibrations:
    `sqrt(mean[((Pu - Ptest)/Ptest)^2])`.  `delta_max` and `Rult` stay at their
    measured/input values.
 2. **FE calibration** - runs the OpenSees fallback for the selected
-   specimens and fits the capacity bias factor
-   `s = Σ(f_i/t_i) / Σ((f_i/t_i)^2)`, stored in
-   `ConnectionInput.fem.capacity_factor` and applied to every later FE
-   capacity.  The calibration run uses elastic plates for speed and
-   robustness; the normal FE dialog can still use J2 plates.
+   specimens, tests a small set of perpendicular-force factors, fits the
+   capacity bias factor `s = Σ(f_i/t_i) / Σ((f_i/t_i)^2)` for each, and keeps
+   the combination with the lowest relative error.  It writes
+   `fem.capacity_factor`, `fem.perpendicular_force_factor`,
+   `fem.mesh_min_element` and `fem.mesh_max_element`, which are then used by
+   the normal FE dialog.  The calibration run uses elastic plates for speed
+   and robustness; the normal FE dialog can still use J2 plates.
 
 The Calibrate dialog shows a **tree of all experimental sets and samples** with
 check boxes, so a user can, for example, use all Crawford & Kulak samples plus
@@ -390,6 +395,9 @@ OpenSees fallback (`Analysis → Run FE fallback`, or
 `python -m eccbolt.benchmarks --fea`).  It no longer assumes rigid, linear
 plates:
 
+* **user-controlled mesh size** – the FE dialog exposes separate **minimum**
+  and **maximum element sizes**.  The maximum is used away from the bolts and
+  the minimum refines the hole boundaries and bearing zones;
 * **real bolt holes** – each plate is meshed with a circular opening of
   diameter `d + hole clearance` (Delaunay triangulation, `Tri31` plane-stress
   elements).  The net section and the stress concentration at the hole are
@@ -411,11 +419,17 @@ plates:
 * **capacity** – a load-controlled push-over with the nonlocal plate-yield
   check reports the first limit state (bolt shear, plate tear-out/net section
   or gross plate yielding), the per-bolt forces and the governing mode;
-* **calibration** – the FE capacity bias factor can be fitted to any selected
-  experimental sets/samples (including the Denavit tearout tests and the
-  single-plate tests from Ashakul's tables) with
-  `Analysis → Calibrate C&K parameters` or
-  `python -m eccbolt.calibration --sets all --fea`.
+* **visualisation** – the *FE mesh / stress* tab displays the actual fallback
+  mesh, optional von Mises stress contours, and the calculated bolt force
+  vectors.  The three display options are check boxes next to the results;
+* **Calibrate button** – the FE dialog and the main window have a *Calibrate*
+  button.  It fits the selected experimental sets/samples, adjusting the C&K
+  `mu`/`lambda`, the FE capacity factor, the perpendicular-force factor and
+  the recommended mesh bounds, so the error against the physical results is
+  minimised;
+* **help** – *Analysis → How the FE fallback works…* and the *How it works*
+  button in the FE dialog explain the mesh, holes, clearance, bolt law and
+  failure criteria.
 
 The fallback is checked against the **same physical specimens** used for the
 analytical verification:
@@ -451,8 +465,8 @@ reassembler creates the complete `EccentricBolt.exe` locally.
 
 Download all six files into one folder, double-click
 `reassemble_and_verify.bat`; it produces `EccentricBolt.exe`
-(116,525,842 bytes, SHA-256
-`10d4c90a95b87423f206c286f889f9047d02e471eed2bf3d156eece351ada5fb`) and refuses
+(116,727,413 bytes, SHA-256
+`d96a3beed488ceeb0d27bdcc6b9249bb48f125cb173c480286ca42d642a3e584`) and refuses
 to continue if any part is incomplete.  This build includes the configurable
 C&K parameters, the Calibrate command and the nonlinear OpenSees fallback.
 
@@ -471,12 +485,12 @@ The shipped binary passes all modes (`SELFTEST OK`, `FEA SELFTEST OK`,
 ### If Windows reports "This app can't run on your PC"
 
 The published executable is a verified, uncorrupted x64 PE (SHA-256
-`10d4c90a…51ada5fb`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
+`d96a3bee…2a3e584`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
 therefore almost always means one of:
 
 1. **The copy on your PC is truncated/corrupted** (large single-file download).
    Check with `certutil -hashfile EccentricBolt.exe SHA256` (size must be
-   116,525,842 bytes).  If it differs, use the transfer-robust delivery:
+   116,727,413 bytes).  If it differs, use the transfer-robust delivery:
    download the five parts plus `reassemble_and_verify.bat` from
    `windows_exe/split_parts/` and double-click `reassemble_and_verify.bat` -
    it rebuilds the exe and verifies its SHA-256 before you run it.

@@ -107,6 +107,9 @@ class FeaCalibrationResult:
     initial_mean_ratio: float
     n_cases: int
     n_used: int
+    perpendicular_factor: float = 0.5
+    mesh_min: Optional[float] = None
+    mesh_max: Optional[float] = None
     cases: List[Tuple[str, float, float, float]] = field(default_factory=list)
     errors: List[Tuple[str, str]] = field(default_factory=list)
 
@@ -118,6 +121,12 @@ class FeaCalibrationResult:
 
     def apply(self, ci: ConnectionInput) -> None:
         ci.fem.capacity_factor = float(self.factor)
+        ci.fem.perpendicular_force_factor = float(self.perpendicular_factor)
+        if self.mesh_max is not None:
+            ci.fem.mesh_max_element = float(self.mesh_max)
+            ci.fem.mesh = float(self.mesh_max)
+        if self.mesh_min is not None:
+            ci.fem.mesh_min_element = float(self.mesh_min)
 
     def format(self) -> str:
         lines = [
@@ -126,6 +135,11 @@ class FeaCalibrationResult:
             f"specimens used                    : {self.n_used}/{self.n_cases}",
             f"capacity factor                   : {self.initial_factor:.4f}"
             f" -> {self.factor:.4f}",
+            f"perpendicular force factor        : "
+            f"{self.perpendicular_factor:.4f}",
+            f"element size min / max [mm]       : "
+            f"{(self.mesh_min or 0)*1000:.2f} / "
+            f"{(self.mesh_max or 0)*1000:.2f}",
             f"relative RMSE                     : {self.initial_rmse:10.4f}"
             f" -> {self.rmse:10.4f}  ({self.improvement*100:+.1f} %)",
             f"mean Ptest/Pfe                    : "
@@ -301,6 +315,7 @@ def calibrate_fea_parameters(
         mesh: float = 0.012,
         plate_nonlinear: bool = False,
         fea_options: Optional[Dict] = None,
+        tune_perpendicular: bool = True,
         verbose: bool = False) -> FeaCalibrationResult:
     """Calibrate the FE fallback capacity bias against selected specimens.
 
@@ -320,48 +335,73 @@ def calibrate_fea_parameters(
         raise ValueError("no FE-compatible experimental cases selected")
     options = dict(fea_options or {})
     options.pop("capacity_factor", None)
-    details = []
-    errors = []
-    for case in cases:
-        if verbose:
-            print(f"  FE calibration: {case.case_id} ...", flush=True)
-        try:
-            res = case.fea_analysis(mesh=mesh,
-                                    plate_nonlinear=plate_nonlinear,
-                                    capacity_factor=1.0, **options)
-            cap = res.get("raw_capacity") or res.get("capacity")
-            if not res.get("ok") or not cap:
+    if "perpendicular_force_factor" in options:
+        candidates = (float(options.pop("perpendicular_force_factor")),)
+    elif tune_perpendicular:
+        candidates = (0.5, 0.35, 0.65)
+    else:
+        candidates = (0.5,)
+
+    def run_candidate(perp):
+        opts = dict(options, perpendicular_force_factor=perp)
+        details = []
+        errors = []
+        for case in cases:
+            if verbose:
+                print(f"  FE calibration (perp={perp:.2f}): "
+                      f"{case.case_id} ...", flush=True)
+            try:
+                res = case.fea_analysis(mesh=mesh,
+                                        plate_nonlinear=plate_nonlinear,
+                                        capacity_factor=1.0, **opts)
+                cap = res.get("raw_capacity") or res.get("capacity")
+                if not res.get("ok") or not cap:
+                    errors.append((case.case_id,
+                                   res.get("message", "no FE capacity")))
+                    continue
+                details.append((case, float(cap)))
+            except Exception as exc:
                 errors.append((case.case_id,
-                               res.get("message", "no FE capacity")))
-                continue
-            details.append((case, float(cap)))
-        except Exception as exc:
-            errors.append((case.case_id, f"{type(exc).__name__}: {exc}"))
-    if not details:
-        raise ValueError("the FE model produced no usable capacities: "
-                         + "; ".join(e for _, e in errors[:3]))
+                               f"{type(exc).__name__}: {exc}"))
+        if not details:
+            return None
+        q = [cap / case.failure_load for case, cap in details]
+        factor = sum(q) / sum(x * x for x in q) if q else 1.0
 
-    q = [cap / case.failure_load for case, cap in details]
-    factor = sum(q) / sum(x * x for x in q) if q else 1.0
-    cases_out = []
-    for case, cap in details:
-        cases_out.append((case.case_id, case.failure_load, cap,
-                          cap * factor))
+        def stats(fac):
+            errs = [(fac * cap - case.failure_load) / case.failure_load
+                    for case, cap in details]
+            rmse = math.sqrt(sum(e * e for e in errs) / len(errs))
+            ratios = [case.failure_load / (fac * cap)
+                      for case, cap in details]
+            return rmse, sum(ratios) / len(ratios)
 
-    def stats(fac):
-        errs = [(fac * cap - case.failure_load) / case.failure_load
-                for case, cap in details]
-        rmse = math.sqrt(sum(e * e for e in errs) / len(errs))
-        ratios = [case.failure_load / (fac * cap) for case, cap in details]
-        return rmse, sum(ratios) / len(ratios)
+        rmse0, ratio0 = stats(1.0)
+        rmse1, ratio1 = stats(factor)
+        cases_out = [(case.case_id, case.failure_load, cap, cap * factor)
+                     for case, cap in details]
+        return dict(perp=perp, factor=factor, rmse0=rmse0, rmse1=rmse1,
+                    ratio0=ratio0, ratio1=ratio1, details=details,
+                    cases=cases_out, errors=errors)
 
-    rmse0, ratio0 = stats(1.0)
-    rmse1, ratio1 = stats(factor)
+    best = None
+    for perp in candidates:
+        result = run_candidate(perp)
+        if result is None:
+            continue
+        if best is None or result["rmse1"] < best["rmse1"]:
+            best = result
+    if best is None:
+        raise ValueError("the FE model produced no usable capacities")
+    mesh_max = float(mesh)
+    mesh_min = float(options.get("mesh_min_element") or mesh / 3.0)
     return FeaCalibrationResult(
-        factor=factor, initial_factor=1.0, rmse=rmse1, initial_rmse=rmse0,
-        mean_ratio=ratio1, initial_mean_ratio=ratio0,
-        n_cases=len(cases), n_used=len(details), cases=cases_out,
-        errors=errors)
+        factor=best["factor"], initial_factor=1.0,
+        rmse=best["rmse1"], initial_rmse=best["rmse0"],
+        mean_ratio=best["ratio1"], initial_mean_ratio=best["ratio0"],
+        n_cases=len(cases), n_used=len(best["details"]),
+        perpendicular_factor=best["perp"], mesh_min=mesh_min,
+        mesh_max=mesh_max, cases=best["cases"], errors=best["errors"])
 
 
 def calibrate_selected(selection=None, include_ck: bool = True,
