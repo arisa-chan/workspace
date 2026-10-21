@@ -451,8 +451,8 @@ reassembler creates the complete `EccentricBolt.exe` locally.
 
 Download all six files into one folder, double-click
 `reassemble_and_verify.bat`; it produces `EccentricBolt.exe`
-(116,590,369 bytes, SHA-256
-`54f1d0168950317730f9f88f68ecb03f5d3cb8afb104353986f872b83e88142a`) and refuses
+(116,527,490 bytes, SHA-256
+`60d887fc3e4f939aea36d1592c17fb57f32949e3bb4d69051381d97dc35a0abb`) and refuses
 to continue if any part is incomplete.  This build includes the configurable
 C&K parameters, the Calibrate command and the nonlinear OpenSees fallback.
 
@@ -471,12 +471,12 @@ The shipped binary passes all modes (`SELFTEST OK`, `FEA SELFTEST OK`,
 ### If Windows reports "This app can't run on your PC"
 
 The published executable is a verified, uncorrupted x64 PE (SHA-256
-`54f1d016…83e88142a`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
+`60d887fc…35a0abb`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
 therefore almost always means one of:
 
 1. **The copy on your PC is truncated/corrupted** (large single-file download).
    Check with `certutil -hashfile EccentricBolt.exe SHA256` (size must be
-   116,590,369 bytes).  If it differs, use the transfer-robust delivery:
+   116,527,490 bytes).  If it differs, use the transfer-robust delivery:
    download the five parts plus `reassemble_and_verify.bat` from
    `windows_exe/split_parts/` and double-click `reassemble_and_verify.bat` -
    it rebuilds the exe and verifies its SHA-256 before you run it.

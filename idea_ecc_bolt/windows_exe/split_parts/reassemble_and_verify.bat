@@ -10,7 +10,7 @@ echo Reassembling EccentricBolt.exe from 5 parts ...
 copy /b EccentricBolt.exe.001+EccentricBolt.exe.002+EccentricBolt.exe.003+EccentricBolt.exe.004+EccentricBolt.exe.005 EccentricBolt.exe >nul
 if not exist EccentricBolt.exe goto :missing
 echo Verifying SHA-256 ...
-certutil -hashfile EccentricBolt.exe SHA256 | find /i "54f1d0168950317730f9f88f68ecb03f5d3cb8afb104353986f872b83e88142a" >nul
+certutil -hashfile EccentricBolt.exe SHA256 | find /i "60d887fc3e4f939aea36d1592c17fb57f32949e3bb4d69051381d97dc35a0abb" >nul
 if errorlevel 1 (
     echo ERROR: hash mismatch - a part file is missing or corrupted.
     echo Make sure all 5 part files were downloaded completely.
@@ -18,7 +18,7 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo OK - EccentricBolt.exe is intact ^(SHA-256 verified, 116,590,369 bytes^).
+echo OK - EccentricBolt.exe is intact ^(SHA-256 verified, 116,527,490 bytes^).
 echo You can now double-click EccentricBolt.exe
 pause
 exit /b 0
