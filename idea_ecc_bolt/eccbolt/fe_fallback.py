@@ -822,8 +822,16 @@ class _FeModel:
         for step in range(1, self.max_steps + 1):
             ok = ops.analyze(1, dlam)
             if ok != 0:
-                # retry with a smaller step and progressively more robust
-                # nonlinear solution algorithms
+                # The Windows OpenSees J2 material can corrupt its internal
+                # state after a failed return mapping.  Re-entering analyze()
+                # on that state caused a page fault (c0000005 / Wine crash),
+                # so the nonlinear path stops cleanly.  The elastic path is
+                # safe to retry with smaller steps and other algorithms.
+                if self.nonlinear:
+                    return dict(ok=False, message=f"J2 plate update did not "
+                                f"converge at load factor {prev_lam:.3f}; "
+                                f"rerun with elastic plates or a finer mesh",
+                                capacity=None, bolts=[], iterations=step)
                 for alg in ("ModifiedNewton", "NewtonLineSearch", "BFGS"):
                     ops.algorithm(alg)
                     ok = ops.analyze(1, 0.25 * dlam)
@@ -1042,15 +1050,10 @@ def solve(model: Dict, verbose: bool = False) -> Dict:
     model = dict(model)
     result = _attempt(model, verbose)
 
-    if not result.get("ok") and bool(model.get("plate_nonlinear", True)):
-        fallback = dict(model, plate_nonlinear=False)
-        retry = _attempt(fallback, verbose)
-        if retry.get("ok"):
-            retry["plate_model"] = "elastic (J2 fallback)"
-            retry["notes"] = ("J2 plate update did not converge; capacity "
-                              "from the elastic-plate model")
-            result = retry
-
+    # Do NOT rebuild/retry a failed J2 model in the same process: the Windows
+    # OpenSees build can page-fault while the failed material state is being
+    # destroyed.  The GUI defaults to elastic plates; users who request J2 get
+    # a clean diagnostic instead of a crash.
     if result.get("ok") and result.get("failure_mode") == "not reached":
         hint = float(model.get("capacity_hint", 0.0) or 0.0)
         cap = float(result.get("capacity") or 0.0)

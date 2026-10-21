@@ -406,12 +406,13 @@ plates:
   bearing trusses on the hole boundary.  The trusses have an initial radial gap
   `(d_hole − d_bolt)/2`, so the bolt idles through the clearance before it
   bears on the plate;
-* **nonlinear plates** – the default plate material is `J2Plasticity` with the
-  measured `fy/fu` (elastic plates are still available for comparison).  The
-  immediate bearing zone and the fixed boundary layer are kept elastic so the
-  point-wise bearing stress cannot make the J2 return mapping singular; if a
-  J2 step still fails, the run is repeated elastically and the result is
-  flagged as `elastic (J2 fallback)`;
+* **plate material** – elastic plates are the safe default on the Windows
+  OpenSees build.  `J2Plasticity` with the measured `fy/fu` is available as an
+  opt-in checkbox; the immediate bearing zone and fixed boundary layer stay
+  elastic to keep the local return mapping stable.  If a J2 step fails, the
+  analysis now stops with a diagnostic instead of re-entering the corrupted
+  OpenSees state (which caused a Wine/Windows page fault); rerun with elastic
+  plates or a finer mesh;
 * **vector C&K bolts** – the bolt force is applied through a pair of orthogonal
   nonlinear links oriented with the expected C&K bolt-force direction, so the
   direction of the bolt force follows the vector law instead of being tied to
@@ -465,8 +466,8 @@ reassembler creates the complete `EccentricBolt.exe` locally.
 
 Download all six files into one folder, double-click
 `reassemble_and_verify.bat`; it produces `EccentricBolt.exe`
-(116,727,413 bytes, SHA-256
-`d96a3beed488ceeb0d27bdcc6b9249bb48f125cb173c480286ca42d642a3e584`) and refuses
+(116,727,827 bytes, SHA-256
+`0ab066a7a738773ff46d7e34d4b374d7f606787dd444b93ec2e08f32886faba4`) and refuses
 to continue if any part is incomplete.  This build includes the configurable
 C&K parameters, the Calibrate command and the nonlinear OpenSees fallback.
 
@@ -485,12 +486,12 @@ The shipped binary passes all modes (`SELFTEST OK`, `FEA SELFTEST OK`,
 ### If Windows reports "This app can't run on your PC"
 
 The published executable is a verified, uncorrupted x64 PE (SHA-256
-`d96a3bee…2a3e584`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
+`0ab066a7…886faba4`, see `windows_exe/EccentricBolt.exe.sha256`).  That dialog
 therefore almost always means one of:
 
 1. **The copy on your PC is truncated/corrupted** (large single-file download).
    Check with `certutil -hashfile EccentricBolt.exe SHA256` (size must be
-   116,727,413 bytes).  If it differs, use the transfer-robust delivery:
+   116,727,827 bytes).  If it differs, use the transfer-robust delivery:
    download the five parts plus `reassemble_and_verify.bat` from
    `windows_exe/split_parts/` and double-click `reassemble_and_verify.bat` -
    it rebuilds the exe and verifies its SHA-256 before you run it.

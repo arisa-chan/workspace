@@ -139,7 +139,9 @@ class FemOptions:
     mesh_min_element: Optional[float] = None   # m, finest element near holes
     mesh_max_element: Optional[float] = None   # m, coarsest element far away
     triangulate: bool = True               # circular holes via Delaunay mesh
-    plate_nonlinear: bool = True           # J2 plasticity (False = elastic)
+    # Elastic plates are the safe default on the Windows/OpenSees build; J2
+    # plasticity remains available as an opt-in check.
+    plate_nonlinear: bool = False          # True = J2 plasticity
     contact_gap: bool = True               # one-sided bearing with clearance
     elastic_bearing_radius: float = 1.5    # x hole radius kept elastic
     elastic_boundary_width: float = 0.05   # m, kept elastic near supports

@@ -989,9 +989,10 @@ class MainWindow(QMainWindow):
             "initial radial gap models the hole clearance.\n\n"
             "3. The plates can be elastic or J2-plastic (fy/fu from the input). "
             "The immediate bearing zone and the fixed boundary layer remain "
-            "elastic to keep the local contact stress numerically stable; if "
-            "the J2 update still fails, the run is repeated elastically and "
-            "that is reported in the result.\n\n"
+            "elastic to keep the local contact stress numerically stable.  "
+            "Elastic plates are the safe default; if the opt-in J2 update "
+            "fails, the run stops with a diagnostic (rerun elastically or "
+            "with a finer mesh).\n\n"
             "4. A load-controlled push-over is run.  Bolt deformation is the "
             "relative displacement of the two pin nodes, including bolt shear, "
             "plate bearing and clearance.  Capacity is the first limit state: "
@@ -1038,8 +1039,11 @@ class MainWindow(QMainWindow):
             "fe_mesh_max_mm",
             (self.ci.fem.mesh_max_element
              or self.ci.fem.mesh or 0.008) * 1000)))
-        chk_nl = QCheckBox("nonlinear J2 plates")
-        chk_nl.setChecked(self.settings.value("fe_nonlinear", "1") == "1")
+        chk_nl = QCheckBox("nonlinear J2 plates (opt-in)")
+        chk_nl.setChecked(bool(self.ci.fem.plate_nonlinear))
+        chk_nl.setToolTip("Elastic plates are the safe default. J2 is an "
+                          "opt-in check and may stop with a diagnostic if "
+                          "the local return mapping does not converge.")
         chk_gap = QCheckBox("model hole clearance (bearing gap)")
         chk_gap.setChecked(self.settings.value("fe_gap", "1") == "1")
         factor = QDoubleSpinBox()
@@ -1076,6 +1080,7 @@ class MainWindow(QMainWindow):
         self.ci.fem.mesh_max_element = (mesh_max.value() / 1000.0
                                         if mesh_max.value() else None)
         self.ci.fem.mesh = self.ci.fem.mesh_max_element
+        self.ci.fem.plate_nonlinear = chk_nl.isChecked()
         self.ci.fem.capacity_factor = factor.value()
         from .fe_fallback import model_from_connection
         model = model_from_connection(

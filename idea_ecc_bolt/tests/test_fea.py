@@ -18,7 +18,9 @@ def test_fea_model_contains_holes_clearance_and_nonlinear_plates():
     model = model_from_connection(ci)
     assert model["hole_clearance"] == ci.bolt_hole_clearance
     assert model["bolt_diameter"] == ci.bolt_diameter
-    assert model["plate_nonlinear"] is True
+    assert model["plate_nonlinear"] is False   # safe default
+    ci.fem.plate_nonlinear = True
+    assert model_from_connection(ci)["plate_nonlinear"] is True
     assert model["mu"] == pytest.approx(ci.bolt_mat.mu)
     assert model["ck_lambda"] == pytest.approx(ci.bolt_mat.ck_lambda)
     ci.fem.mesh_min_element = 0.003
